@@ -16,7 +16,7 @@ export default function Index() {
 
   return (
     <View className="flex justify-center items-center mt-4">
-      <Text>Redirecting to driver...</Text>
+      <Text>Starting driver page</Text>
     </View>
   );
 }

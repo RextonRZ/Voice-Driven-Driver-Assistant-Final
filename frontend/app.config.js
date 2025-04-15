@@ -1,20 +1,29 @@
-{
+import 'dotenv/config';
+
+export default {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "grabmate",
+    "slug": "grabmate",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "portraitr",
     "icon": "./assets/images/icon.png",
     "scheme": "grabmate",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.grabmate.app",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.grabmate.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": process.env.GOOGLE_MAPS_API_KEY
+        }
       }
     },
     "web": {
