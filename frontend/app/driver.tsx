@@ -14,10 +14,6 @@ export default function Driver() {
     const [loading, setLoading] = React.useState(true)
     const snapPoints = useMemo(() =>['10%', '50%', '90%'], []);
 
-    const handlePresentModalPress = useCallback(() => {
-        bottomSheetModalRef.current?.present();
-    }, []);
-
     const handleSheetChanges = useCallback((index: number) => {
         console.log('Bottom sheet index:', index)
     }, [])
