@@ -12,7 +12,10 @@ export default {
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.grabmate.app",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": process.env.GOOGLE_MAPS_API_KEY
+      }
     },
     "android": {
       "package": "com.grabmate.app",
