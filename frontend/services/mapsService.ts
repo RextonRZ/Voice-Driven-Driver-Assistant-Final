@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { GOOGLE_MAPS_API_KEY } from '@env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - adjust based on your development environment
@@ -12,11 +11,13 @@ export class MapsService {
    * Gets the Google Maps API key from environment variables or backend
    */
   static async getApiKey(): Promise<string> {
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+
     try {
       // First try to get from environment variables
-      if (GOOGLE_MAPS_API_KEY) {
+      if (apiKey) {
         console.log('Using API key from environment variables');
-        return GOOGLE_MAPS_API_KEY;
+        return apiKey;
       }
       
       console.warn('Unable to load API key from @env, will try backend');
