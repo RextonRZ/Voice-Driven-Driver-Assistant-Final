@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - adjust based on your development environment
 // const API_URL = 'http://10.0.2.2:8000/api/v1'; // Use this for Android emulator
-//const API_URL = 'http://10.167.75.62:8000/api/v1';  // Use this for Samsung A52s (Vanness)
+//const API_URL = 'http://10.167.74.96:8000/api/v1';  // Use this for Samsung A52s (Vanness)
 const API_URL = 'http://192.168.100.227:8081/api/v1';  
 // const API_URL = 'http://localhost:8000/api/v1'; // Use this for iOS simulator
 // const API_URL = 'https://your-production-api.com/api/v1'; // Production URL
@@ -93,4 +93,25 @@ export class MapsService {
       throw error;
     }
   }
+
+  /**
+   * Utility function to calculate the distance between two geographical points.
+   */
+  static calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+
+    const R = 6371; // Radius of the Earth in kilometers
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in kilometers
+
+    return distance * 1000; // Convert to meters
+  };
 }

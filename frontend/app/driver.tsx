@@ -1,24 +1,79 @@
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react'
-import { Button, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { Button, StatusBar, StyleSheet, Text, TouchableOpacity, View, TouchableWithoutFeedback, Animated, TextStyle } from 'react-native'
 import MapView, { Marker, Region, PROVIDER_GOOGLE, Polyline } from 'react-native-maps'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Feather } from '@expo/vector-icons'
+import { Feather, FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons'
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import * as Location from 'expo-location'
 import { router } from 'expo-router'
 import { MapsService } from '../services/mapsService'
+import { ScrollView } from 'react-native-gesture-handler'
 
 export default function Driver() {
-    const [region, setRegion] = React.useState<Region | null>(null)
-    const [apiKey, setApiKey] = React.useState<string | null>(null)
-    const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
-    const [durationInTraffic, setDurationInTraffic] = useState<string | null>(null);
+    const [region, setRegion] = useState<Region | null>(null)
+    const [apiKey, setApiKey] = useState<string | null>(null)
     const [distance, setDistance] = useState<string | null>(null);
-    const destination = { latitude: 3.1175, longitude: 101.6773 }; // temporary remember to settle this
+    const [durationInTraffic, setDurationInTraffic] = useState<string | null>(null);
+    const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
+    const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
+    const [customerCoords, setCustomerCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [currentMarker, setCurrentMarker] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [destinationMarker, setDestinationMarker] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [approve, setApprove] = useState(false);
+    const [loading, setLoading] = useState(true)
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [showTraffic, setShowTraffic] = useState(false);
+    const [animatedIndex, setAnimatedIndex] = useState(0);
+    const [showModal, setShowModal] = useState(false);
+    const [showCountdownModal, setShowCountdownModal] = useState(false);
+    const [showMessageModal, setShowMessageModal] = useState(false);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [messages, setMessages] = useState<string[]>([]);
+    const [isNavigatingToCustomer, setIsNavigatingToCustomer] = useState(false);
+    const [countdown, setCountdown] = useState(5);
 
-    const [loading, setLoading] = React.useState(true)
-    const snapPoints = useMemo(() => ['18%', '60%'], []);
+    const mapRef = useRef<MapView>(null);
+    const bottomSheetRef = useRef<BottomSheet>(null);
+    const animatedValue = useRef(new Animated.Value(0)).current;
+    const pulseAnim = useRef(new Animated.Value(1)).current;
+    const opacityAnimation = useRef(new Animated.Value(0.6)).current;
+    const snapPoints = useMemo(() => ['18%', '62%'], []);
 
+    // Start the pulse animation for loading effects
+    useEffect(() => {
+        if (loading) {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(pulseAnim, {
+                        toValue: 1.2,
+                        duration: 800,
+                        useNativeDriver: true
+                    }),
+                    Animated.timing(pulseAnim, {
+                        toValue: 1,
+                        duration: 800,
+                        useNativeDriver: true
+                    })
+                ])
+            ).start();
+        } else {
+            pulseAnim.setValue(1);
+        }
+    }, [region]);
+
+    // Customer details
+    const customer =
+    {
+        name: "Angel Chan",
+        rating: "4.5",
+        phone: "+6011 9876 5432",
+        // origin: "Faculty of Computer Science and Information Technology",
+        origin: "Tun Ahmad Zaidi Residential College",
+        destination: "Mid Valley Megamall North Court Entrance",
+        fare: "RM 15.00",
+    };
+
+    // Find current user location
     useEffect(() => {
         const setupMap = async () => {
             try {
@@ -50,44 +105,43 @@ export default function Driver() {
         setupMap()
     }, [])
 
-    const fetchRoute = async () => {
-        if (!region) {
-            console.log('Region is not set');
-            return;
+    // Find the customer origin
+    useEffect(() => {
+        if (region && apiKey) {
+            setCurrentMarker({
+                latitude: region.latitude,
+                longitude: region.longitude,
+            });
+
+            // Fetch the customer's origin coordinates
+            MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
+                setDestinationMarker(coords);
+            });
+
+            setTimeout(() => {
+                setShowModal(true); // Show the modal after a delay
+            }, 2000);
         }
+    }, [region, apiKey]);
 
-        console.log('Fetching route...');
-        const origin = `${region.latitude},${region.longitude}`;
-        const placeName = "Mid Valley Megamall North Court Entrance"; // Hardcoded place name
+    // Animation for the path
+    const startAnimation = (length: number) => {
+        animatedValue.setValue(0);
+        Animated.loop(
+            Animated.timing(animatedValue, {
+                toValue: length,
+                duration: 5000, // 5 seconds for the full animation
+                useNativeDriver: false,
+            })
+        ).start();
 
-        try {
-            // Fetch the destination coordinates dynamically
-            const destinationCoords = await MapsService.getPlaceCoordinates(placeName);
-            console.log(`Destination coordinates for ${placeName}:`, destinationCoords);
-
-            // Fetch directions using the origin and destination coordinates
-            const directions = await MapsService.getDirections(origin, `${destinationCoords.latitude},${destinationCoords.longitude}`);
-            console.log('Directions fetched:', directions);
-
-            // Extract estimated time in traffic
-            const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
-            console.log(`Estimated time in traffic: ${durationInTraffic}`);
-            setDurationInTraffic(durationInTraffic);
-
-            // Extract distance
-            const distanceText = directions.routes[0].legs[0].distance.text;
-            console.log(`Distance: ${distanceText}`);
-            setDistance(distanceText);
-
-            // Decode the polyline and update the route
-            const points = decodePolyline(directions.routes[0].overview_polyline.points);
-            console.log('Decoded polyline points:', points);
-            setRouteCoordinates(points);
-        } catch (error) {
-            console.error('Error fetching route:', error);
-        }
+        // Use an Animated.event to update the state
+        animatedValue.addListener(({ value }) => {
+            setAnimatedIndex(Math.floor(value));
+        });
     };
 
+    // Decode polyline function
     const decodePolyline = (encoded: string) => {
         let points: { latitude: number; longitude: number }[] = [];
         let index = 0, len = encoded.length;
@@ -119,11 +173,217 @@ export default function Driver() {
         return points;
     };
 
+    // Modify your showMessageModal function
+    const handleShowMessageModal = () => {
+        setShowMessageModal(true);
+        setCurrentIndex(0); // Reset the bottom sheet index
+        bottomSheetRef.current?.snapToIndex(0); // Open the bottom sheet
+        // Reset messages when opening the modal
+        setMessages([]);
+    };
+
+    // Function to close message modal
+    const closeMessageModal = () => {
+        setShowMessageModal(false);
+    };
+
+    // Approve customer button
+    const handleApprove = async () => {
+        setApprove(true); // Set approve to true
+        setShowModal(false); // Close the modal
+        setIsNavigatingToCustomer(true); // Start navigating to the customer
+
+        if (!region) return;
+
+        if (currentMarker === null || destinationMarker === null) {
+            setCurrentMarker({
+                latitude: region.latitude,
+                longitude: region.longitude,
+            });
+
+            // Fetch the customer's origin coordinates
+            MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
+                setDestinationMarker(coords);
+            });
+        }
+
+        const origin = `${region.latitude},${region.longitude}`;
+        const customerOrigin = customer.origin; // Use the customer's origin
+
+        try {
+            const customerCoordsResponse = await MapsService.getPlaceCoordinates(customerOrigin);
+            setCustomerCoords(customerCoordsResponse); // Save customer's coordinates
+
+            const directions = await MapsService.getDirections(origin, `${customerCoordsResponse.latitude},${customerCoordsResponse.longitude}`);
+
+            // Extract estimated time in traffic
+            const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
+            console.log(`Estimated time in traffic: ${durationInTraffic}`);
+            setDurationInTraffic(durationInTraffic);
+
+            // Extract distance
+            const distanceText = directions.routes[0].legs[0].distance.text;
+            console.log(`Distance: ${distanceText}`);
+            setDistance(distanceText);
+
+            // Decode the polyline and update the route
+            const points = decodePolyline(directions.routes[0].overview_polyline.points);
+            console.log('Decoded polyline points:', points);
+            setRouteCoordinates(points);
+
+            // Start the animation
+            startAnimation(points.length);
+        } catch (error) {
+            console.error('Error fetching route to customer:', error);
+        }
+    };
+
+    // Check if the driver is close to the customer
+    useEffect(() => {
+        if (isNavigatingToCustomer && customerCoords) {
+            const interval = setInterval(async () => {
+                const location = await Location.getCurrentPositionAsync({});
+                const distanceToCustomer = MapsService.calculateDistance(
+                    location.coords.latitude,
+                    location.coords.longitude,
+                    customerCoords.latitude,
+                    // 3.131705,
+                    customerCoords.longitude,
+                    // 101.651224
+                );
+
+                if (distanceToCustomer < 50) {
+                    clearInterval(interval);
+                    startCountdown();
+                }
+            }, 2000);
+
+            return () => clearInterval(interval);
+        }
+    }, [isNavigatingToCustomer, customerCoords]);
+
+    const startCountdown = () => {
+        setShowCountdownModal(true); // Show the countdown modal
+        let timer = 5; // 5-second countdown
+        setCountdown(timer);
+
+        const interval = setInterval(() => {
+            timer -= 1;
+            setCountdown(timer);
+
+            if (timer === 0) {
+                clearInterval(interval);
+                setShowCountdownModal(false); // Hide the countdown modal
+
+                // Update markers
+                if (customerCoords) {
+                    setCurrentMarker(customerCoords); // Move "You Are Here" marker to customer's origin
+                }
+
+                MapsService.getPlaceCoordinates(customer.destination).then((coords) => {
+                    setDestinationMarker(coords); // Move destination marker to customer's destination
+                });
+
+                navigateToDestination(); // Navigate to the customer's destination
+            }
+        }, 1000); // 1-second interval
+    };
+
+    const navigateToDestination = async () => {
+        setIsNavigatingToCustomer(false); // Stop navigating to the customer
+
+        const customerCoords = await MapsService.getPlaceCoordinates(customer.origin);
+        const destinationCoords = await MapsService.getPlaceCoordinates(customer.destination);
+
+        try {
+            const directions = await MapsService.getDirections(
+                `${customerCoords.latitude},${customerCoords.longitude}`,
+                `${destinationCoords.latitude},${destinationCoords.longitude}`
+            );
+            const points = decodePolyline(directions.routes[0].overview_polyline.points);
+
+            setRouteCoordinates(points); // Set the route to the destination
+
+            // Extract estimated time in traffic
+            const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
+            console.log(`Estimated time in traffic: ${durationInTraffic}`);
+            setDurationInTraffic(durationInTraffic);
+
+            // Extract distance
+            const distanceText = directions.routes[0].legs[0].distance.text;
+            console.log(`Distance: ${distanceText}`);
+            setDistance(distanceText);
+
+            // Start the animation
+            startAnimation(points.length);
+
+            // Monitor proximity to the destination
+            const interval = setInterval(async () => {
+                const location = await Location.getCurrentPositionAsync({});
+                const distanceToDestination = MapsService.calculateDistance(
+                    location.coords.latitude,
+                    location.coords.longitude,
+                    destinationCoords.latitude,
+                    // 3.131705,
+                    destinationCoords.longitude,
+                    // 101.651224
+                );
+
+                if (distanceToDestination < 50) { // Within 50 meters
+                    clearInterval(interval);
+                    handleDestinationReached(); // Handle destination reached
+                }
+            }, 2000); // Check every 2 seconds
+        } catch (error) {
+            console.error('Error fetching route to destination:', error);
+        }
+    };
+
+    const handleDestinationReached = () => {
+        // Show the success modal
+        setShowSuccessModal(true);
+
+        // Reset all states after a delay
+        setTimeout(() => {
+            setShowSuccessModal(false); // Hide the success modal
+            animatedValue.stopAnimation(); // Stop the animation
+            setRouteCoordinates([]); // Clear the path
+            setCurrentMarker(null); // Remove the current marker
+            setDestinationMarker(null); // Remove the destination marker
+            setApprove(false); // Reset approval
+            setCustomerCoords(null); // Clear customer coordinates
+            setDistance(null); // Clear distance
+            setDurationInTraffic(null); // Clear duration
+        }, 5000); // 5-second delay
+    };
+
+    // Header and Bottom Sheet styles
+    const headerStyle = {
+        backgroundColor: '#00B14F', // Green for light mode
+        padding: 16,
+    };
+    const headerTextStyle: TextStyle = {
+        color: '#FFFFFF', // White for light mode
+        fontSize: 20,
+        fontWeight: 'bold',
+    };
+    const bottomSheetStyle = {
+        backgroundColor: '#FFFFFF', // White for light mode
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+    };
+    const bottomSheetTextStyle: TextStyle = {
+        color: '#000000', // Black for light mode
+        fontSize: 16,
+        fontWeight: 'bold',
+    };
+
     return (
         <SafeAreaView style={{ flex: 1 }}>
             <StatusBar translucent backgroundColor="#00B14F" barStyle="dark-content" />
 
-            <View className="p-4 bg-primary border-b border-gray-200">
+            {/* Header */}
+            <View style={headerStyle}>
                 <View className="flex-row items-center">
                     <TouchableOpacity
                         onPress={() => router.push('/')}
@@ -132,29 +392,71 @@ export default function Driver() {
                         <Feather name="arrow-left" size={24} color="#00B14F" />
                     </TouchableOpacity>
 
-                    <Text className="text-2xl ml-6 font-bold text-accent">Driver</Text>
+                    <Text style={[headerTextStyle, { marginLeft: 16 }]}>Driver</Text>
                 </View>
             </View>
 
             {loading ? (
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text>Loading map...</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EAEAEA' }}>
+                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
+                        {/* Pulsing Circle */}
+                        <Animated.View
+                            style={[
+                                styles.pulse,
+                                {
+                                    transform: [{ scale: pulseAnim }], // Apply the pulse animation
+                                    opacity: pulseAnim.interpolate({
+                                        inputRange: [1, 1.2],
+                                        outputRange: [0.6, 0.3], // Fade out as it scales up
+                                    }),
+                                },
+                            ]}
+                        />
+
+                        {/* Static Pin */}
+                        <View style={styles.pin} />
+                    </View>
+                    <Text className='text-xl mt-14 font-bold'>Setting things up for you...</Text>
                 </View>
             ) : region && apiKey ? (
                 <MapView
+                    ref={mapRef}
                     style={{ flex: 1 }}
                     provider={PROVIDER_GOOGLE}
                     region={region}
                     showsUserLocation={true}
                     followsUserLocation={true}
-                    userInterfaceStyle='light'
+                    userInterfaceStyle="light"
+                    mapType={mapType}
+                    showsTraffic={showTraffic}
+                    showsMyLocationButton={false}
+                    customMapStyle={lightMapStyle}
                 >
-                    {region && (
-                        <Marker coordinate={region} title="You are here" />
+                    {/* "You Are Here" Marker */}
+                    {currentMarker && approve && (
+                        <Marker
+                            coordinate={currentMarker}
+                            title="You are here"
+                            image={require('../assets/images/origin-icon.png')}
+                        />
                     )}
-                    <Marker coordinate={destination} title="Mid Valley Megamall" />
+
+                    {/* Destination Marker */}
+                    {destinationMarker && approve && (
+                        <Marker
+                            coordinate={destinationMarker}
+                            title="Destination"
+                            image={require('../assets/images/destination-icon.png')}
+                        />
+                    )}
+
+                    {/* Route Polyline */}
                     {routeCoordinates.length > 0 && (
-                        <Polyline coordinates={routeCoordinates} strokeWidth={4} strokeColor="blue" />
+                        <Polyline
+                            coordinates={routeCoordinates.slice(0, animatedIndex)}
+                            strokeWidth={4}
+                            strokeColor="#00b14f"
+                        />
                     )}
                 </MapView>
             ) : (
@@ -163,18 +465,434 @@ export default function Driver() {
                 </View>
             )}
 
-            <TouchableOpacity onPress={fetchRoute} style={styles.button}>
-                <Text style={styles.buttonText}>Get Directions</Text>
+            {/* Relocate Button */}
+            <TouchableOpacity
+                style={styles.relocateButton}
+                onPress={() => {
+                    if (region) {
+                        mapRef.current?.animateToRegion(region, 1000); // Animate to user's location
+                    }
+                }}
+            >
+                <Feather name="crosshair" size={24} color="#fff" />
             </TouchableOpacity>
 
-            <BottomSheet snapPoints={snapPoints}>
-                <BottomSheetView style={styles.contentContainer}>
-                    <Text style={styles.sheetTitle}>Bottom Sheet Content</Text>
-                    {durationInTraffic && <Text>Estimated Time: {durationInTraffic}</Text>}
-                    {distance && <Text>Distance: {distance}</Text>}
-                </BottomSheetView>
+            {/* Toggle Map Type */}
+            <TouchableOpacity
+                style={styles.toggleButton}
+                onPress={() => setMapType(mapType === 'standard' ? 'hybrid' : 'standard')}
+            >
+                <MaterialIcons name="satellite-alt" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            {/* Toggle Traffic */}
+            <TouchableOpacity
+                style={styles.trafficButton}
+                onPress={() => setShowTraffic(!showTraffic)}
+            >
+                <MaterialIcons name="traffic" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            {showModal && (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: 98,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: 16,
+                    }}
+                >
+                    <View
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: 12,
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.25,
+                            shadowRadius: 3.84,
+                            elevation: 5,
+                            width: '100%',
+                            maxWidth: 400,
+                        }}
+                    >
+                        <View style={{ padding: 16, borderBottomWidth: 1, borderColor: '#ddd', flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>
+                                New Ride Request
+                            </Text>
+                        </View>
+
+                        <View className="p-4">
+                            <View className="flex-row items-center mb-3">
+                                <View className="h-10 w-10 bg-blue-50 rounded-full items-center justify-center mr-3">
+                                    <Feather name="user" size={18} color="#1595E6" />
+                                </View>
+                                <View>
+                                    <Text className="font-medium text-gray-800">{customer.name}</Text>
+                                    <View className="flex-row items-center">
+                                        <Feather name="star" size={12} color="#f59e0b" />
+                                        <Text className="text-gray-600 ml-1 text-sm">{customer.rating}</Text>
+                                    </View>
+                                </View>
+                            </View>
+
+                            <View className="flex-row items-center mb-3">
+                                <View className="h-10 w-10 bg-red-100 rounded-full items-center justify-center mr-3">
+                                    <Feather name="map-pin" size={18} color="#ef4444" />
+                                </View>
+                                <View className='pr-10'>
+                                    <Text className="font-medium text-gray-800 max-w-fit text-ellipsis">{customer.destination}</Text>
+                                </View>
+                            </View>
+
+                            <View className="flex-row items-center mb-3">
+                                <View className="h-10 w-10 bg-green-100 rounded-full items-center justify-center mr-3">
+                                    <Feather name="dollar-sign" size={18} color="#00B14F" />
+                                </View>
+                                <Text className="text-gray-800">{customer.fare}</Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', marginTop: 16 }}>
+                                <TouchableOpacity
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: '#ddd',
+                                        padding: 12,
+                                        borderRadius: 8,
+                                        alignItems: 'center',
+                                        marginRight: 8,
+                                    }}
+                                    onPress={() => {
+                                        animatedValue.stopAnimation();
+                                        setRouteCoordinates([]);
+
+                                        setCurrentMarker(null);
+                                        setDestinationMarker(null);
+
+                                        setApprove(false)
+                                        setShowModal(false);
+                                        setTimeout(() => {
+                                            setShowModal(true);
+                                        }, 10000);
+                                    }}
+                                >
+                                    <Text style={{ color: '#333', fontWeight: 'bold' }}>Decline</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: '#00B14F',
+                                        padding: 12,
+                                        borderRadius: 8,
+                                        alignItems: 'center',
+                                    }}
+                                    onPress={handleApprove} // Approve and navigate to customer
+                                >
+                                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Approve</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+
+            )
+            }
+
+            {
+                showCountdownModal && (
+                    <View
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            backgroundColor: 'rgba(0,0,0,0.5)',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                        }}
+                    >
+                        <View
+                            style={{
+                                backgroundColor: 'white',
+                                borderRadius: 12,
+                                padding: 24,
+                                alignItems: 'center',
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.25,
+                                shadowRadius: 3.84,
+                                elevation: 5,
+                            }}
+                        >
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>
+                                Looks like you've reached the customer!
+                            </Text>
+
+                            <Animated.View
+                                style={{
+                                    marginBottom: 16,
+                                    transform: [
+                                        {
+                                            rotate: animatedValue.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: ['0deg', '360deg'],
+                                            }),
+                                        },
+                                    ],
+                                }}
+                            >
+                                <Feather name="clock" size={48} color="#00B14F" />
+                            </Animated.View>
+                            <Text style={{ fontSize: 16, color: '#333', marginBottom: 8 }}>
+                                Rerouting in {countdown}...
+                            </Text>
+                        </View>
+                    </View>
+                )
+            }
+
+            {/* Message Modal */}
+            {showMessageModal && (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: 98, // Position below the header
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        justifyContent: 'flex-start',
+                        alignItems: 'center',
+                        padding: 16,
+                    }}
+                >
+                    <View
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: 12,
+                            shadowColor: "#000",
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.25,
+                            shadowRadius: 3.84,
+                            elevation: 5,
+                            width: '100%',
+                            maxWidth: 400,
+                            height: '70%',
+                        }}
+                    >
+                        {/* Modal Header */}
+                        <View className="p-4 border-b border-gray-100 flex-row justify-between items-center">
+                            <View className="flex-row items-center">
+                                <View className="h-10 w-10 bg-green-100 rounded-full items-center justify-center mr-3">
+                                    <Feather name="user" size={18} color="#00B14F" />
+                                </View>
+                                <Text className="font-bold text-lg text-gray-800">{customer.name}</Text>
+                            </View>
+                            <TouchableOpacity
+                                className="h-10 w-10 rounded-full items-center justify-center"
+                                onPress={closeMessageModal}
+                            >
+                                <Feather name="x" size={24} color="#6b7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Messages Container */}
+                        <ScrollView
+                            className="flex-1 p-4"
+                            contentContainerStyle={{ flexGrow: 1 }}
+                        >
+
+                            <View className="flex-1 items-center justify-center">
+                                <Text className="text-gray-500 text-center">Start your conversation with {customer.name}</Text>
+                            </View>
+
+                        </ScrollView>
+
+                        {/* Message Input */}
+                        <View className="p-3 border-t border-gray-100 flex-row justify-between">
+                            <View className="flex-row w-10/12 rounded-full border border-accent bg-gray-100 px-4 py-2">
+                                <Text className="text-gray-500">Send a message...</Text>
+                            </View>
+                            <TouchableOpacity
+                                className="h-10 w-10 bg-green-50 rounded-full items-center justify-center mr-2"
+                            // onPress={sendMessage}
+                            // disabled={isSending}
+                            >
+                                <Feather name="send" size={18} color="#00B14F"></Feather>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            )}
+
+            {showSuccessModal && (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                    }}
+                >
+                    <View
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: 12,
+                            padding: 24,
+                            alignItems: 'center',
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.25,
+                            shadowRadius: 3.84,
+                            elevation: 5,
+                        }}
+                    >
+                        <Feather name="check-circle" size={48} color="#00B14F" />
+                        <View
+                            style={{
+                                justifyContent: 'center', // Center content vertically
+                                alignItems: 'center', // Center content horizontally
+                                marginTop: 8, // Add spacing between the icon and text
+                            }}
+                        >
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
+                                You have reached {customer.destination}. Nice driving!
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            )}
+
+            <BottomSheet snapPoints={snapPoints}
+                enablePanDownToClose={false}
+                index={0}
+                onChange={(index) => setCurrentIndex(index)}
+                ref={bottomSheetRef}
+                handleIndicatorStyle={{
+                    width: 35,
+                    height: 4.5,
+                    backgroundColor: '#D3D3D3',
+                    borderRadius: 3,
+                }}
+                backgroundStyle={bottomSheetStyle}>
+
+                <TouchableWithoutFeedback
+                    onPress={() => {
+                        // Toggle between the first and second snap points
+                        const nextIndex = currentIndex === 0 ? 1 : 0;
+                        bottomSheetRef.current?.snapToIndex(nextIndex);
+                    }}
+                >
+                    <BottomSheetView style={{
+                        flex: 1,
+                        alignItems: 'center',
+                        padding: 15,
+                        backgroundColor: '#FFFFFF', // White for light mode
+                        borderTopLeftRadius: 20,
+                        borderTopRightRadius: 20
+                    }}>
+                        {/* 18% View */}
+                        {!approve ? (
+                            <>
+                                <View className="pt-2 flex-row justify-center">
+                                    <Ionicons name="car-sport-outline" size={48} color="#00B14F" />
+                                </View>
+                                <View className="pt-1 flex-row justify-center">
+                                    <Text className="text-1xl font-bold text-primary">Let's ride!</Text>
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <View className="flex-row justify-between w-full px-5">
+                                    <Text className="text-xl font-bold text-gray-800">
+                                        {isNavigatingToCustomer
+                                            ? `Pick up at ${customer.origin}`
+                                            : `Drop off at ${customer.destination}`}
+                                    </Text>
+                                </View>
+                                <View className="pt-3 flex-row justify-between w-full px-5">
+                                    <Text className="text-m text-gray-600">
+                                        Arriving in: {durationInTraffic || 'Calculating...'}
+                                    </Text>
+                                    <Text className="text-m text-gray-600">
+                                        Distance: {distance || 'Calculating...'}
+                                    </Text>
+                                </View>
+                            </>
+                        )}
+
+                        {/* 62% View */}
+                        {approve && (
+                            <View className="pt-6 w-full">
+                                <View
+                                    style={{
+                                        height: 1,
+                                        backgroundColor: '#ddd',
+                                        marginVertical: 8,
+                                        width: '100%',
+                                    }}
+                                />
+                                <View className='p-2 flex-row items-center'>
+                                    <Text className="font-bold text-lg text-gray-800">Customer Details</Text>
+                                </View>
+                                <View
+                                    style={{
+                                        backgroundColor: 'white',
+                                        borderWidth: 1,
+                                        borderColor: '#ddd',
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.1,
+                                        shadowRadius: 4,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        marginVertical: 8, // Add spacing around the container
+                                    }}
+                                >
+                                    <View className="h-12 w-12 bg-green-100 rounded-full items-center justify-center mr-3">
+                                        <Feather name="user" size={24} color="#00B14F" />
+                                    </View>
+                                    <View className="flex-1">
+                                        <View className="flex-row items-center">
+                                            <Text className="font-bold text-lg text-gray-800">{customer.name}</Text>
+                                            <View className="flex-row items-center ml-2">
+                                                <Feather name="star" size={14} color="#f59e0b" />
+                                                <Text className="text-gray-600 ml-1">{customer.rating}</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+
+                                    <TouchableOpacity
+                                        className="h-10 w-10 bg-green-50 rounded-full items-center justify-center">
+                                        <Feather name="phone" size={18} color="#00B14F" />
+                                    </TouchableOpacity>
+
+                                    <View className="ml-2" />
+
+                                    <TouchableOpacity
+                                        className="h-10 w-10 bg-green-50 rounded-full items-center justify-center"
+                                        onPress={handleShowMessageModal}>
+                                        <Feather name="message-square" size={18} color="#00B14F" />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    </BottomSheetView>
+                </TouchableWithoutFeedback>
             </BottomSheet>
-        </SafeAreaView>
+        </SafeAreaView >
     )
 }
 
@@ -190,15 +908,11 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         marginBottom: 20,
     },
-    contentContainer: {
-        flex: 1,
-        alignItems: 'center',
-        padding: 15,
-    },
     sheetTitle: {
         fontSize: 20,
         fontWeight: 'bold',
         marginBottom: 12,
+        color: '#FFFFFF',
     },
     button: {
         position: 'absolute',
@@ -213,4 +927,125 @@ const styles = StyleSheet.create({
         color: 'white',
         fontWeight: 'bold',
     },
+    originMarker: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#E6F4EA',
+        borderRadius: 20,
+        padding: 5,
+    },
+    destinationMarker: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FDE6E6',
+        borderRadius: 20,
+        padding: 5,
+    },
+    relocateButton: {
+        position: 'absolute',
+        top: 220,
+        right: 15,
+        backgroundColor: '#00B14F',
+        borderRadius: 25,
+        padding: 10,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+    },
+    toggleButton: {
+        position: 'absolute',
+        top: 110,
+        right: 15,
+        backgroundColor: '#00B14F',
+        borderRadius: 25,
+        padding: 10,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+    },
+    trafficButton: {
+        position: 'absolute',
+        top: 165,
+        right: 15,
+        backgroundColor: '#00B14F',
+        borderRadius: 25,
+        padding: 10,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+    },
+    toggleButtonText: {
+        color: '#333',
+        fontWeight: 'bold',
+    },
+    pulse: {
+        position: 'absolute',
+        height: 80,
+        width: 80,
+        borderRadius: 40,
+        backgroundColor: '#00A651', // grab green
+    },
+    pin: {
+        height: 20,
+        width: 20,
+        backgroundColor: 'white',
+        borderRadius: 10,
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1.5,
+    },
 });
+
+// Map Styles
+const lightMapStyle = [
+    {
+        elementType: 'geometry',
+        stylers: [{ color: '#f5f5f5' }],
+    },
+    {
+        elementType: 'labels.text.fill',
+        stylers: [{ color: '#616161' }],
+    },
+    {
+        elementType: 'labels.text.stroke',
+        stylers: [{ color: '#f5f5f5' }],
+    },
+    {
+        featureType: 'road',
+        elementType: 'geometry',
+        stylers: [{ color: '#ffffff' }],
+    },
+    {
+        featureType: 'water',
+        elementType: 'geometry',
+        stylers: [{ color: '#a2daf2' }],
+    },
+    {
+        featureType: 'water',
+        elementType: 'labels.text.fill',
+        stylers: [{ color: '#blue' }],
+    },
+    {
+        featureType: 'administrative.country',
+        elementType: 'geometry.stroke',
+        stylers: [{ color: '#CCCCCCC' }, { weight: 1.5 }],
+    },
+    {
+        featureType: 'administrative.province',
+        elementType: 'geometry.stroke',
+        stylers: [{ color: '#CCCCCCC' }, { weight: 1 }],
+    },
+    {
+        featureType: 'landscape.natural.landcover',
+        elementType: 'geometry.fill',
+        stylers: [{ color: '#EAEAEA' }],
+    },
+];
