@@ -63,7 +63,7 @@ def get_directions(
         raise HTTPException(status_code=500, detail=f"Error fetching directions: {str(e)}")
     
 @router.get("/place-coordinates")
-def get_directions(
+def get_coordinates(
     placeName: str = Query(..., description="Name of the place to search for"),
     current_user: User = Depends(get_current_user) if not DEV_MODE else None
 ):

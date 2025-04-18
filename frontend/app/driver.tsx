@@ -30,18 +30,53 @@ export default function Driver() {
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [messages, setMessages] = useState<string[]>([]);
     const [isNavigatingToCustomer, setIsNavigatingToCustomer] = useState(false);
+    const [isNavigatingToDestination, setIsNavigatingToDestination] = useState(false);
     const [countdown, setCountdown] = useState(5);
+    const [steps, setSteps] = useState<any[]>([]); // To store navigation steps
+    const [currentStepIndex, setCurrentStepIndex] = useState(0); // Track the current step
+    const [nextInstruction, setNextInstruction] = useState<string | null>(null); // Current navigation instruction
+    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [isPowerOn, setIsPowerOn] = useState(false);
 
     const mapRef = useRef<MapView>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
     const animatedValue = useRef(new Animated.Value(0)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
-    const opacityAnimation = useRef(new Animated.Value(0.6)).current;
-    const snapPoints = useMemo(() => ['18%', '62%'], []);
+    const snapPoints = useMemo(() => (approve ? ['18%', '62%'] : ['18%']), [approve]);
+
+    // Utility function to strip HTML tags
+    const stripHtml = (html: string): string => {
+        // Remove <div> and its content
+        html = html.replace(/<div[^>]*>.*?<\/div>/g, '');
+        // Remove other HTML tags
+        return html.replace(/<[^>]*>/g, '').trim();
+    };
+
+    const formatDistance = (distance: string): string => {
+        if (distance.includes('km')) {
+            const kmValue = parseFloat(distance);
+            if (kmValue < 1) {
+                return `${Math.round(kmValue * 1000)} m`; // Convert to meters
+            }
+            return distance; // Keep as is for 1 km or more
+        }
+        return distance; // Return as is for other formats
+    };
+
+    // Used for the bottom sheet
+    useEffect(() => {
+        if (!approve) {
+            bottomSheetRef.current?.snapToIndex(0); // Collapse to the first snap point
+        }
+    }, [approve]);
+
+    useEffect(() => {
+        console.log('Snap points updated:', snapPoints);
+    }, [snapPoints]);
 
     // Start the pulse animation for loading effects
     useEffect(() => {
-        if (loading) {
+        if (loading || isProcessingPayment) {
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(pulseAnim, {
@@ -59,7 +94,7 @@ export default function Driver() {
         } else {
             pulseAnim.setValue(1);
         }
-    }, [region]);
+    }, [loading, isProcessingPayment]);
 
     // Customer details
     const customer =
@@ -67,9 +102,10 @@ export default function Driver() {
         name: "Angel Chan",
         rating: "4.5",
         phone: "+6011 9876 5432",
-        // origin: "Faculty of Computer Science and Information Technology",
+        //origin: "Faculty of Computer Science and Information Technology",
         origin: "Tun Ahmad Zaidi Residential College",
-        destination: "Mid Valley Megamall North Court Entrance",
+        // destination: "Mid Valley Megamall North Court Entrance",
+        destination: "Perdana Siswa Complex (KPS)",
         fare: "RM 15.00",
     };
 
@@ -107,7 +143,7 @@ export default function Driver() {
 
     // Find the customer origin
     useEffect(() => {
-        if (region && apiKey) {
+        if (region && apiKey && !isNavigatingToDestination) {
             setCurrentMarker({
                 latitude: region.latitude,
                 longitude: region.longitude,
@@ -117,12 +153,8 @@ export default function Driver() {
             MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
                 setDestinationMarker(coords);
             });
-
-            setTimeout(() => {
-                setShowModal(true); // Show the modal after a delay
-            }, 2000);
         }
-    }, [region, apiKey]);
+    }, [region, apiKey, isNavigatingToDestination]);
 
     // Animation for the path
     const startAnimation = (length: number) => {
@@ -216,20 +248,31 @@ export default function Driver() {
 
             const directions = await MapsService.getDirections(origin, `${customerCoordsResponse.latitude},${customerCoordsResponse.longitude}`);
 
+            const steps = directions.routes[0].legs[0].steps.map((step: any) => ({
+                ...step,
+                plain_instructions: stripHtml(step.html_instructions), // Add plain text instructions
+                distance: step.distance,
+            }));
+
+            console.log('Steps:', steps[0].plain_instructions); // Log the steps for debugging
+
+            setSteps(steps); // Save steps for navigation
+            setNextInstruction(steps[0]?.plain_instructions || ''); // Set the first instruction
+
             // Extract estimated time in traffic
             const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
-            console.log(`Estimated time in traffic: ${durationInTraffic}`);
             setDurationInTraffic(durationInTraffic);
 
             // Extract distance
             const distanceText = directions.routes[0].legs[0].distance.text;
-            console.log(`Distance: ${distanceText}`);
+
             setDistance(distanceText);
 
             // Decode the polyline and update the route
             const points = decodePolyline(directions.routes[0].overview_polyline.points);
-            console.log('Decoded polyline points:', points);
             setRouteCoordinates(points);
+
+            setSteps(steps);
 
             // Start the animation
             startAnimation(points.length);
@@ -275,15 +318,6 @@ export default function Driver() {
                 clearInterval(interval);
                 setShowCountdownModal(false); // Hide the countdown modal
 
-                // Update markers
-                if (customerCoords) {
-                    setCurrentMarker(customerCoords); // Move "You Are Here" marker to customer's origin
-                }
-
-                MapsService.getPlaceCoordinates(customer.destination).then((coords) => {
-                    setDestinationMarker(coords); // Move destination marker to customer's destination
-                });
-
                 navigateToDestination(); // Navigate to the customer's destination
             }
         }, 1000); // 1-second interval
@@ -291,27 +325,37 @@ export default function Driver() {
 
     const navigateToDestination = async () => {
         setIsNavigatingToCustomer(false); // Stop navigating to the customer
+        setIsNavigatingToDestination(true);
 
         const customerCoords = await MapsService.getPlaceCoordinates(customer.origin);
         const destinationCoords = await MapsService.getPlaceCoordinates(customer.destination);
+
+        // Update markers
+        setCurrentMarker(customerCoords); // Move "You Are Here" marker to customer's origin
+        setDestinationMarker(destinationCoords); // Move destination marker to customer's destination
 
         try {
             const directions = await MapsService.getDirections(
                 `${customerCoords.latitude},${customerCoords.longitude}`,
                 `${destinationCoords.latitude},${destinationCoords.longitude}`
             );
-            const points = decodePolyline(directions.routes[0].overview_polyline.points);
 
+            const steps = directions.routes[0].legs[0].steps.map((step: any) => ({
+                ...step,
+                plain_instructions: stripHtml(step.html_instructions),
+            }));
+            setSteps(steps); // Save steps for navigation
+            setNextInstruction(steps[0]?.plain_instructions || ''); // Set the first instruction
+
+            const points = decodePolyline(directions.routes[0].overview_polyline.points);
             setRouteCoordinates(points); // Set the route to the destination
 
             // Extract estimated time in traffic
             const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
-            console.log(`Estimated time in traffic: ${durationInTraffic}`);
             setDurationInTraffic(durationInTraffic);
 
             // Extract distance
             const distanceText = directions.routes[0].legs[0].distance.text;
-            console.log(`Distance: ${distanceText}`);
             setDistance(distanceText);
 
             // Start the animation
@@ -339,22 +383,71 @@ export default function Driver() {
         }
     };
 
+    const checkNextStep = (currentLocation: Location.LocationObjectCoords) => {
+        if (!steps || currentStepIndex >= steps.length) return;
+
+        const nextStep = steps[currentStepIndex];
+        const distanceToNextStep = MapsService.calculateDistance(
+            currentLocation.latitude,
+            currentLocation.longitude,
+            nextStep.end_location.lat,
+            nextStep.end_location.lng
+        );
+
+        if (distanceToNextStep < 50) { // If close to the next step
+            setCurrentStepIndex(currentStepIndex + 1); // Move to the next step
+            setNextInstruction(steps[currentStepIndex + 1]?.plain_instructions || ''); // Update the instruction
+        }
+    };
+
+    useEffect(() => {
+        const watchPosition = async () => {
+            await Location.watchPositionAsync(
+                { accuracy: Location.Accuracy.High, distanceInterval: 10 },
+                (location) => {
+                    setRegion({
+                        latitude: location.coords.latitude,
+                        longitude: location.coords.longitude,
+                        latitudeDelta: 0.01,
+                        longitudeDelta: 0.01,
+                    });
+
+                    // Check for the next step in the route
+                    checkNextStep(location.coords);
+                }
+            );
+        };
+
+        watchPosition();
+    }, [steps, currentStepIndex]);
+
     const handleDestinationReached = () => {
         // Show the success modal
         setShowSuccessModal(true);
 
-        // Reset all states after a delay
+        // Show "Nice driving!" for 5 seconds, then start payment processing
         setTimeout(() => {
-            setShowSuccessModal(false); // Hide the success modal
-            animatedValue.stopAnimation(); // Stop the animation
-            setRouteCoordinates([]); // Clear the path
-            setCurrentMarker(null); // Remove the current marker
-            setDestinationMarker(null); // Remove the destination marker
-            setApprove(false); // Reset approval
-            setCustomerCoords(null); // Clear customer coordinates
-            setDistance(null); // Clear distance
-            setDurationInTraffic(null); // Clear duration
-        }, 5000); // 5-second delay
+            setIsProcessingPayment(true);
+
+            // Simulate payment processing for 10 seconds
+            setTimeout(() => {
+                setIsProcessingPayment(false);
+                setShowSuccessModal(false);
+
+                // Reset all states
+                animatedValue.stopAnimation();
+                setRouteCoordinates([]);
+                setCurrentMarker(null);
+                setDestinationMarker(null);
+                setApprove(false);
+                setCustomerCoords(null);
+                setDistance(null);
+                setDurationInTraffic(null);
+                setSteps([]);
+                setCurrentStepIndex(0);
+                setNextInstruction(null);
+            }, 10000);
+        }, 5000);
     };
 
     // Header and Bottom Sheet styles
@@ -395,6 +488,79 @@ export default function Driver() {
                     <Text style={[headerTextStyle, { marginLeft: 16 }]}>Driver</Text>
                 </View>
             </View>
+
+            <TouchableOpacity
+                style={{
+                    position: 'absolute',
+                    top: 116, // Below the header
+                    left: 16,
+                    backgroundColor: isPowerOn ? '#00B14F' : '#FFFFFF', // Green when on, white when off
+                    borderRadius: 25,
+                    padding: 10,
+                    elevation: 5,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 3,
+                    zIndex: 1,
+                }}
+                onPress={() => {
+                    if (region) {
+                        setIsPowerOn(!isPowerOn); // Toggle the button state
+
+                        // Only show the modal if turning on the power and navigation/payment is not finished
+                        if (!isPowerOn) {
+                            if (!approve && !isProcessingPayment) {
+                                setTimeout(() => {
+                                    setShowModal(true); // Show the modal after a delay
+                                }, 2000);
+                            }
+                        } else {
+                            setShowModal(false); // Hide the modal when turning off the power
+                        }
+                    }
+                }}
+            >
+                <Feather
+                    name="power"
+                    size={24}
+                    color={isPowerOn ? '#FFFFFF' : '#00B14F'} // White when on, green when off
+                />
+            </TouchableOpacity>
+
+            {/* Container below the header */}
+            {approve && steps.length > 0 && (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: 116,
+                        left: 16,
+                        right: 16,
+                        backgroundColor: '#fff',
+                        paddingTop: 12,
+                        paddingBottom: 16,
+                        paddingLeft: 16,
+                        paddingRight: 16,
+                        borderTopWidth: 1,
+                        borderColor: '#ddd',
+                        borderRadius: 20,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                        elevation: 3,
+                        zIndex: 2,
+                    }}
+                >
+                    <Text style={{ fontSize: 20, color: '#00b14f', fontWeight: 'bold', textAlign: 'right' }}>
+                        {formatDistance(steps[currentStepIndex]?.distance?.text || 'Calculating...')}
+                    </Text>
+
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', paddingTop: 4, textAlign: 'justify' }}>
+                        {steps[currentStepIndex]?.plain_instructions || 'No instructions available'}
+                    </Text>
+                </View>
+            )}
 
             {loading ? (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EAEAEA' }}>
@@ -467,7 +633,7 @@ export default function Driver() {
 
             {/* Relocate Button */}
             <TouchableOpacity
-                style={styles.relocateButton}
+                style={[styles.relocateButton]}
                 onPress={() => {
                     if (region) {
                         mapRef.current?.animateToRegion(region, 1000); // Animate to user's location
@@ -479,7 +645,7 @@ export default function Driver() {
 
             {/* Toggle Map Type */}
             <TouchableOpacity
-                style={styles.toggleButton}
+                style={[styles.toggleButton]}
                 onPress={() => setMapType(mapType === 'standard' ? 'hybrid' : 'standard')}
             >
                 <MaterialIcons name="satellite-alt" size={24} color="#fff" />
@@ -487,13 +653,13 @@ export default function Driver() {
 
             {/* Toggle Traffic */}
             <TouchableOpacity
-                style={styles.trafficButton}
+                style={[styles.trafficButton]}
                 onPress={() => setShowTraffic(!showTraffic)}
             >
                 <MaterialIcons name="traffic" size={24} color="#fff" />
             </TouchableOpacity>
 
-            {showModal && (
+            {showModal && !approve && region && (
                 <View
                     style={{
                         position: 'absolute',
@@ -502,7 +668,7 @@ export default function Driver() {
                         left: 0,
                         right: 0,
                         backgroundColor: 'rgba(0,0,0,0.5)',
-                        justifyContent: 'center',
+                        justifyContent: 'space-evenly',
                         alignItems: 'center',
                         padding: 16,
                     }}
@@ -528,8 +694,8 @@ export default function Driver() {
 
                         <View className="p-4">
                             <View className="flex-row items-center mb-3">
-                                <View className="h-10 w-10 bg-blue-50 rounded-full items-center justify-center mr-3">
-                                    <Feather name="user" size={18} color="#1595E6" />
+                                <View className="h-10 w-10 bg-slate-100 rounded-full items-center justify-center mr-3">
+                                    <Feather name="user" size={18} color="000000" />
                                 </View>
                                 <View>
                                     <Text className="font-medium text-gray-800">{customer.name}</Text>
@@ -537,6 +703,15 @@ export default function Driver() {
                                         <Feather name="star" size={12} color="#f59e0b" />
                                         <Text className="text-gray-600 ml-1 text-sm">{customer.rating}</Text>
                                     </View>
+                                </View>
+                            </View>
+
+                            <View className="flex-row items-center mb-3">
+                                <View className="h-10 w-10 bg-blue-50 rounded-full items-center justify-center mr-3">
+                                    <Feather name="play-circle" size={18} color="#1595E6" />
+                                </View>
+                                <View className='pr-10'>
+                                    <Text className="font-medium text-gray-800 max-w-fit text-ellipsis">{customer.origin}</Text>
                                 </View>
                             </View>
 
@@ -575,9 +750,6 @@ export default function Driver() {
 
                                         setApprove(false)
                                         setShowModal(false);
-                                        setTimeout(() => {
-                                            setShowModal(true);
-                                        }, 10000);
                                     }}
                                 >
                                     <Text style={{ color: '#333', fontWeight: 'bold' }}>Decline</Text>
@@ -615,6 +787,7 @@ export default function Driver() {
                             backgroundColor: 'rgba(0,0,0,0.5)',
                             justifyContent: 'center',
                             alignItems: 'center',
+                            zIndex: 3
                         }}
                     >
                         <View
@@ -631,7 +804,7 @@ export default function Driver() {
                             }}
                         >
                             <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>
-                                Looks like you've reached the customer!
+                                You've reached the customer!
                             </Text>
 
                             <Animated.View
@@ -742,6 +915,7 @@ export default function Driver() {
                         backgroundColor: 'rgba(0,0,0,0.5)',
                         justifyContent: 'center',
                         alignItems: 'center',
+                        zIndex: 3
                     }}
                 >
                     <View
@@ -757,26 +931,72 @@ export default function Driver() {
                             elevation: 5,
                         }}
                     >
-                        <Feather name="check-circle" size={48} color="#00B14F" />
-                        <View
-                            style={{
-                                justifyContent: 'center', // Center content vertically
-                                alignItems: 'center', // Center content horizontally
-                                marginTop: 8, // Add spacing between the icon and text
-                            }}
-                        >
-                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
-                                You have reached {customer.destination}. Nice driving!
-                            </Text>
-                        </View>
+                        {isProcessingPayment ? (
+                            <>
+                                <View className='pt-6 h-20'>
+                                    <View style={{ justifyContent: 'center', alignItems: 'center' }}>
+                                        {/* Pulsing Circle */}
+                                        <Animated.View
+                                            style={[
+                                                styles.pulse,
+                                                {
+                                                    transform: [{ scale: pulseAnim }], // Apply the pulse animation
+                                                    opacity: pulseAnim.interpolate({
+                                                        inputRange: [1, 1.2],
+                                                        outputRange: [0.6, 0.3], // Fade out as it scales up
+                                                    }),
+                                                },
+                                            ]}
+                                        />
+
+                                        {/* Static Pin */}
+                                        <View style={styles.pin} />
+                                    </View>
+                                </View>
+                                <Text
+                                    style={{
+                                        fontSize: 18,
+                                        fontWeight: 'bold',
+                                        color: '#333',
+                                        textAlign: 'center',
+                                        marginTop: 8,
+                                    }}
+                                >
+                                    Processing payment...
+                                </Text>
+                            </>
+                        ) : (
+                            <>
+                                <Feather name="check-circle" size={48} color="#00B14F" />
+                                <Text
+                                    style={{
+                                        fontSize: 18,
+                                        fontWeight: 'bold',
+                                        color: '#333',
+                                        textAlign: 'center',
+                                        marginTop: 8,
+                                    }}
+                                >
+                                    You have reached {customer.destination}!
+                                </Text>
+                            </>
+                        )}
                     </View>
                 </View>
             )}
 
-            <BottomSheet snapPoints={snapPoints}
+            <BottomSheet
+                snapPoints={snapPoints}
                 enablePanDownToClose={false}
                 index={0}
-                onChange={(index) => setCurrentIndex(index)}
+                onAnimate={(fromIndex, toIndex) => {
+                    if (!approve && toIndex !== 0) {
+                        bottomSheetRef.current?.snapToIndex(0); // Force collapse
+                    }
+                }}
+                onChange={(index) => {
+                        setCurrentIndex(index); // Update the current index
+                }}
                 ref={bottomSheetRef}
                 handleIndicatorStyle={{
                     width: 35,
@@ -789,8 +1009,10 @@ export default function Driver() {
                 <TouchableWithoutFeedback
                     onPress={() => {
                         // Toggle between the first and second snap points
-                        const nextIndex = currentIndex === 0 ? 1 : 0;
-                        bottomSheetRef.current?.snapToIndex(nextIndex);
+                        if (approve) {
+                            const nextIndex = currentIndex === 0 ? 1 : 0;
+                            bottomSheetRef.current?.snapToIndex(nextIndex);
+                        }
                     }}
                 >
                     <BottomSheetView style={{
@@ -825,7 +1047,7 @@ export default function Driver() {
                                         Arriving in: {durationInTraffic || 'Calculating...'}
                                     </Text>
                                     <Text className="text-m text-gray-600">
-                                        Distance: {distance || 'Calculating...'}
+                                        Distance: {formatDistance(distance ? distance : '0m') || 'Calculating...'}
                                     </Text>
                                 </View>
                             </>
@@ -887,6 +1109,13 @@ export default function Driver() {
                                         <Feather name="message-square" size={18} color="#00B14F" />
                                     </TouchableOpacity>
                                 </View>
+
+                                <View className="pt-16 flex-row justify-center">
+                                    <Ionicons name="car-sport-outline" size={48} color="#00B14F" />
+                                </View>
+                                <View className="pt-1 flex-row justify-center">
+                                    <Text className="text-1xl font-bold text-primary">Focus on driving!</Text>
+                                </View>
                             </View>
                         )}
                     </BottomSheetView>
@@ -943,8 +1172,8 @@ const styles = StyleSheet.create({
     },
     relocateButton: {
         position: 'absolute',
-        top: 220,
-        right: 15,
+        bottom: 170,
+        left: 15,
         backgroundColor: '#00B14F',
         borderRadius: 25,
         padding: 10,
@@ -956,8 +1185,8 @@ const styles = StyleSheet.create({
     },
     toggleButton: {
         position: 'absolute',
-        top: 110,
-        right: 15,
+        bottom: 280,
+        left: 15,
         backgroundColor: '#00B14F',
         borderRadius: 25,
         padding: 10,
@@ -969,8 +1198,8 @@ const styles = StyleSheet.create({
     },
     trafficButton: {
         position: 'absolute',
-        top: 165,
-        right: 15,
+        bottom: 225,
+        left: 15,
         backgroundColor: '#00B14F',
         borderRadius: 25,
         padding: 10,

@@ -63,6 +63,7 @@ export class MapsService {
       const response = await axios.get(`${API_URL}/maps/directions`, {
         params: { origin, destination },
       });
+      console.log('Directions response:', response.data);
       return response.data;
     } catch (error) {
       console.error('Error fetching directions:', error);
