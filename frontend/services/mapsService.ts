@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Backend API URL - adjust based on your development environment
 // const API_URL = 'http://10.0.2.2:8000/api/v1'; // Use this for Android emulator
 //const API_URL = 'http://10.167.74.96:8000/api/v1';  // Use this for Samsung A52s (Vanness)
-const API_URL = 'http://192.168.100.227:8081/api/v1';  
+const API_URL = 'http://192.168.100.227:8000/api/v1';  
 // const API_URL = 'http://localhost:8000/api/v1'; // Use this for iOS simulator
 // const API_URL = 'https://your-production-api.com/api/v1'; // Production URL
 
@@ -114,4 +114,21 @@ export class MapsService {
 
     return distance * 1000; // Convert to meters
   };
+
+  /**
+   * Test API connectivity to verify backend connection
+   */
+  static async testApiConnection(): Promise<boolean> {
+    try {
+      console.log(`Testing API connection to: ${API_URL}/health-check`);
+      const response = await axios.get(`${API_URL}/health-check`, { 
+        timeout: 5000 // 5 second timeout
+      });
+      console.log('API connection successful:', response.data);
+      return true;
+    } catch (error) {
+      console.error('API connection failed:', error);
+      return false;
+    }
+  }
 }
