@@ -1,14 +1,17 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Body
+from typing import Optional
 
-# Models
-from ..models.request import CrashDetectionRequest, AnalyzeSleepinessRequest # Import new request model
+from ..models.request import CrashDetectionRequest, AnalyzeSleepinessRequest
 from ..models.response import SafetyResponse
-from ..models.internal import CrashReport, SleepinessReport # Import internal models
+from ..models.internal import CrashReport, SleepinessReport
 # Services & Dependencies
-from ..services.safety_service import SafetyService
+from ..services import safety_service
+# Import the dependency getter
+from ..api.dependencies import get_safety_service
 # Exceptions
 from ..core.exception import SafetyError, ConfigurationError, CommunicationError, InvalidRequestError
+from ..services.safety_service import SafetyService
 
 logger = logging.getLogger(__name__)
 
@@ -94,17 +97,64 @@ async def crash_detected(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal error occurred.")
 
 
-# --- Add Sleepiness Endpoint (Placeholder) ---
-# @router.post("/sleepiness-detected")
-# async def sleepiness_detected(...):
-#    Requires image upload handling or data structure
-#    logger.info("Received sleepiness detection report (Placeholder).")
-#    image_data = ...
-#    context = ...
-#    report = await safety_service.analyze_sleepiness(image_data, context)
-#    if report:
-#       # Trigger alert or log?
-#       logger.warning(f"Sleepiness detected: {report}")
-#       return {"status": "sleepiness_detected", "report": report}
-#    else:
-#       return {"status": "ok"}
+@router.post(
+    "/analyze-sleepiness",
+    response_model=SafetyResponse,
+    summary="Analyze image frames for driver drowsiness",
+    description="Receives a batch of recent image frames (base64 encoded) and analyzes them "
+                "using the safety service to detect signs of drowsiness.",
+    status_code=status.HTTP_200_OK # Return result directly
+)
+async def analyze_sleepiness(
+    request_data: AnalyzeSleepinessRequest,
+    safety_service: SafetyService = Depends(get_safety_service) # Inject the service
+) -> SafetyResponse:
+    """
+    Endpoint to handle requests for drowsiness analysis based on image frames.
+    """
+    logger.info(f"Received sleepiness analysis request for session {request_data.session_id}, driver {request_data.driver_id}")
+
+    if not safety_service.drowsiness_enabled:
+        logger.warning("Sleepiness analysis requested, but feature is disabled in settings.")
+        # Return a specific status indicating it's disabled or just that driver is awake?
+        # Let's return 'feature_disabled' for clarity.
+        return SafetyResponse(
+            status="feature_disabled",
+            message="Drowsiness detection feature is currently disabled in the server configuration."
+        )
+
+    try:
+        # Call the analysis function in the safety service
+        sleepiness_report: Optional[SleepinessReport] = await safety_service.analyze_driver_state(
+            image_frames_base64=request_data.image_frames_base64,
+            batch_duration_sec=request_data.batch_duration_sec
+        )
+
+        if sleepiness_report:
+            logger.warning(f"Drowsiness detected for session {request_data.session_id}. Report: {sleepiness_report}")
+            return SafetyResponse(
+                status="drowsiness_detected",
+                message="Potential drowsiness detected based on frame analysis.",
+                details={
+                    "confidence": sleepiness_report.confidence,
+                    "evidence": sleepiness_report.evidence_type,
+                    "timestamp": sleepiness_report.timestamp.isoformat()
+                }
+            )
+        else:
+            logger.info(f"No significant drowsiness detected for session {request_data.session_id}.")
+            return SafetyResponse(
+                status="driver_awake",
+                message="Analysis complete. No significant signs of drowsiness detected."
+            )
+
+    except InvalidRequestError as e:
+        logger.warning(f"Invalid request for sleepiness analysis: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # SafetyError might be raised if models fail internally, though analyze_driver_state currently returns None
+    except SafetyError as e:
+        logger.error(f"Error during sleepiness analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error during analysis: {e.message}")
+    except Exception as e:
+        logger.exception(f"Unexpected error during sleepiness analysis: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal error occurred during analysis.")
