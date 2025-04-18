@@ -139,52 +139,41 @@ async def generic_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     logger.info("Application starting up...")
-    # Enhanced startup checks - try initializing all key clients/services
+    # Enhanced startup checks - Now primarily check if settings load.
+    # Client initialization happens implicitly when dependencies.py is imported.
     try:
-        # Import the specific getter for settings
-        from .dependencies import get_settings
-        # Import the CLIENT CLASSES directly for startup checks
-        from ..core.clients.google_stt import GoogleSttClient
-        from ..core.clients.google_tts import GoogleTtsClient
-        from ..core.clients.gemini import GeminiClient
-        from ..core.clients.google_translate import GoogleTranslateClient
-        from ..core.clients.google_maps import GoogleMapsClient
-        from ..core.clients.twillio_client import TwilioClient
+        # STEP 1: Ensure settings can be loaded.
+        get_settings() # Call the getter to trigger loading/validation
+        logger.info("Settings loaded successfully via get_settings().")
 
-        logger.info("Performing startup initialization checks...")
+        # STEP 2: (Optional) You could potentially add checks here
+        #         that rely on the *already initialized* clients if needed,
+        #         e.g., try a lightweight API call. But the core
+        #         initialization check is handled in dependencies.py.
+        # Example (if needed):
+        # from .dependencies import get_google_stt_client
+        # try:
+        #      stt_client = get_google_stt_client()
+        #      # Maybe list voices or perform a small check if the client API supports it easily
+        #      logger.info("STT client seems accessible.")
+        # except ConfigurationError as e:
+        #      logger.critical(f"STARTUP FAILED: Client Dependency Check Failed - {e}", exc_info=True)
+        #      # sys.exit(1)
 
-        # --- STEP 1: Get the Settings instance (using the cached getter) ---
-        settings_instance = get_settings()
-        logger.info("Settings loaded.")
-
-        # --- STEP 2: Directly INSTANTIATE clients using the settings_instance ---
-        # This bypasses the @lru_cache issue for manual calls during startup
-        GoogleSttClient(settings=settings_instance)
-        logger.info("STT client initialized.")
-        GoogleTtsClient(settings=settings_instance)
-        logger.info("TTS client initialized.")
-        GoogleTranslateClient(settings=settings_instance)
-        logger.info("Translate client initialized.")
-        GeminiClient(settings=settings_instance)
-        logger.info("Gemini client initialized.")
-        GoogleMapsClient(settings=settings_instance)
-        logger.info("Maps client initialized.")
-        TwilioClient(settings=settings_instance)  # Corrected typo
-        logger.info("Twilio client initialized (or disabled).")
-        logger.info("All clients initialized successfully.")
+        logger.info("Core components initialization check complete (via module import).")
 
     except ConfigurationError as e:
-         logger.critical(f"STARTUP FAILED: Configuration error - {e}", exc_info=True)
-         # Consider stopping the server if config fails:
+         # This will catch errors from get_settings() itself
+         logger.critical(f"STARTUP FAILED: Settings configuration error - {e}", exc_info=True)
          # import sys
          # sys.exit(1)
     except Exception as e:
-        logger.critical(f"STARTUP FAILED: Could not initialize core components. Error: {e}", exc_info=True)
+        # Catch any other unexpected error during minimal startup checks
+        logger.critical(f"STARTUP FAILED: Unexpected error during startup phase. Error: {e}", exc_info=True)
         # import sys
         # sys.exit(1)
 
-    logger.info("Application startup complete.")
-
+    logger.info("Application startup sequence complete.")
 
 # --- Root Endpoint ---
 @app.get("/", tags=["Health Check"])
