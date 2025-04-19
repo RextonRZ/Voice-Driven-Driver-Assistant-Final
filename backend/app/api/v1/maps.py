@@ -16,10 +16,11 @@ DEV_MODE = True  # or read from environment: os.getenv("DEV_MODE", "false").lowe
 Logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+
 @router.get("/google-maps-key")
 def get_google_maps_key(
-    platform: Optional[str] = Query(None, description="Parameter kept for compatibility"),
-    current_user: User = Depends(get_current_user) if not DEV_MODE else None
+        platform: Optional[str] = Query(None, description="Parameter kept for compatibility"),
+        current_user: User = Depends(get_current_user) if not DEV_MODE else None
 ):
     """
     Endpoint to get the Google Maps API key.
@@ -32,18 +33,19 @@ def get_google_maps_key(
     except ValueError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/directions")
 def get_directions(
-    origin: str = Query(..., description="Origin coordinates (latitude,longitude)"),
-    destination: str = Query(..., description="Destination coordinates (latitude,longitude)"),
-    current_user: User = Depends(get_current_user) if not DEV_MODE else None
+        origin: str = Query(..., description="Origin coordinates (latitude,longitude)"),
+        destination: str = Query(..., description="Destination coordinates (latitude,longitude)"),
+        current_user: User = Depends(get_current_user) if not DEV_MODE else None
 ):
     """
     Fetch directions from Google Maps Directions API.
     """
     try:
         api_key = MapsService.get_api_key()
-        
+
         url = "https://maps.googleapis.com/maps/api/directions/json"
         params = {
             "origin": origin,
@@ -61,7 +63,8 @@ def get_directions(
         return data
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error fetching directions: {str(e)}")
-    
+
+
 @router.get("/place-coordinates")
 def get_coordinates(
     placeName: str = Query(..., description="Name of the place to search for"),
@@ -72,7 +75,7 @@ def get_coordinates(
     """
     try:
         api_key = MapsService.get_api_key()
-        
+
         url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
         params = {
             "query": placeName,

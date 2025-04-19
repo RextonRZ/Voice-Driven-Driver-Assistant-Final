@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react'
-import { Button, StatusBar, StyleSheet, Text, TouchableOpacity, View, TouchableWithoutFeedback, Animated, TextStyle } from 'react-native'
+import React, { useMemo, useRef, useEffect, useState } from 'react'
+import { StatusBar, StyleSheet, Text, TouchableOpacity, View, TouchableWithoutFeedback, Animated, TextStyle } from 'react-native'
 import MapView, { Marker, Region, PROVIDER_GOOGLE, Polyline } from 'react-native-maps'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Feather, FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons'
+import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons'
 import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
 import * as Location from 'expo-location'
 import { router } from 'expo-router'
@@ -12,6 +12,7 @@ import { ScrollView } from 'react-native-gesture-handler'
 export default function Driver() {
     const [region, setRegion] = useState<Region | null>(null)
     const [apiKey, setApiKey] = useState<string | null>(null)
+    const [messages, setMessages] = useState<string[]>([]);
     const [distance, setDistance] = useState<string | null>(null);
     const [durationInTraffic, setDurationInTraffic] = useState<string | null>(null);
     const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
@@ -19,24 +20,23 @@ export default function Driver() {
     const [customerCoords, setCustomerCoords] = useState<{ latitude: number; longitude: number } | null>(null);
     const [currentMarker, setCurrentMarker] = useState<{ latitude: number; longitude: number } | null>(null);
     const [destinationMarker, setDestinationMarker] = useState<{ latitude: number; longitude: number } | null>(null);
-    const [approve, setApprove] = useState(false);
     const [loading, setLoading] = useState(true)
-    const [currentIndex, setCurrentIndex] = useState(0);
+    const [approve, setApprove] = useState(false);
     const [showTraffic, setShowTraffic] = useState(false);
-    const [animatedIndex, setAnimatedIndex] = useState(0);
     const [showModal, setShowModal] = useState(false);
+    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [isPowerOn, setIsPowerOn] = useState(false);
     const [showCountdownModal, setShowCountdownModal] = useState(false);
     const [showMessageModal, setShowMessageModal] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const [messages, setMessages] = useState<string[]>([]);
     const [isNavigatingToCustomer, setIsNavigatingToCustomer] = useState(false);
     const [isNavigatingToDestination, setIsNavigatingToDestination] = useState(false);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [animatedIndex, setAnimatedIndex] = useState(0);
     const [countdown, setCountdown] = useState(5);
-    const [steps, setSteps] = useState<any[]>([]); // To store navigation steps
-    const [currentStepIndex, setCurrentStepIndex] = useState(0); // Track the current step
-    const [nextInstruction, setNextInstruction] = useState<string | null>(null); // Current navigation instruction
-    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-    const [isPowerOn, setIsPowerOn] = useState(false);
+    const [steps, setSteps] = useState<any[]>([]); 
+    const [currentStepIndex, setCurrentStepIndex] = useState(0); 
+    const [nextInstruction, setNextInstruction] = useState<string | null>(null);
 
     const mapRef = useRef<MapView>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
@@ -52,6 +52,7 @@ export default function Driver() {
         return html.replace(/<[^>]*>/g, '').trim();
     };
 
+    // Format distance to show in meters if less than 1 km
     const formatDistance = (distance: string): string => {
         if (distance.includes('km')) {
             const kmValue = parseFloat(distance);
@@ -103,7 +104,7 @@ export default function Driver() {
         rating: "4.5",
         phone: "+6011 9876 5432",
         //origin: "Faculty of Computer Science and Information Technology",
-        origin: "Tun Ahmad Zaidi Residential College",
+        origin: "Faculty of Science",
         // destination: "Mid Valley Megamall North Court Entrance",
         destination: "Perdana Siswa Complex (KPS)",
         fare: "RM 15.00",
@@ -120,7 +121,11 @@ export default function Driver() {
                     return
                 }
 
-                let location = await Location.getCurrentPositionAsync({})
+                let location = await Location.getCurrentPositionAsync({});
+                const userLocation = {
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                };
                 setRegion({
                     latitude: location.coords.latitude,
                     longitude: location.coords.longitude,
@@ -144,11 +149,6 @@ export default function Driver() {
     // Find the customer origin
     useEffect(() => {
         if (region && apiKey && !isNavigatingToDestination) {
-            setCurrentMarker({
-                latitude: region.latitude,
-                longitude: region.longitude,
-            });
-
             // Fetch the customer's origin coordinates
             MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
                 setDestinationMarker(coords);
@@ -289,10 +289,10 @@ export default function Driver() {
                 const distanceToCustomer = MapsService.calculateDistance(
                     location.coords.latitude,
                     location.coords.longitude,
-                    customerCoords.latitude,
-                    // 3.131705,
-                    customerCoords.longitude,
-                    // 101.651224
+                    // customerCoords.latitude,
+                    3.120864,
+                    // customerCoords.longitude,
+                    101.655115
                 );
 
                 if (distanceToCustomer < 50) {
@@ -368,9 +368,9 @@ export default function Driver() {
                     location.coords.latitude,
                     location.coords.longitude,
                     destinationCoords.latitude,
-                    // 3.131705,
+                    // 3.120864,
                     destinationCoords.longitude,
-                    // 101.651224
+                    // 101.655115
                 );
 
                 if (distanceToDestination < 50) { // Within 50 meters
@@ -995,7 +995,7 @@ export default function Driver() {
                     }
                 }}
                 onChange={(index) => {
-                        setCurrentIndex(index); // Update the current index
+                    setCurrentIndex(index); // Update the current index
                 }}
                 ref={bottomSheetRef}
                 handleIndicatorStyle={{

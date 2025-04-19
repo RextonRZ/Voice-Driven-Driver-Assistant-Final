@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - adjust based on your development environment
 // const API_URL = 'http://10.0.2.2:8000/api/v1'; // Use this for Android emulator
-const API_URL = 'http://10.167.74.96:8000/api/v1';  // Use this for Samsung A52s (Vanness)
+const API_URL = 'http://10.164.107.93:8000/api/v1';  // Use this for Samsung A52s (Vanness)
 // const API_URL = 'http://localhost:8000/api/v1'; // Use this for iOS simulator
 // const API_URL = 'https://your-production-api.com/api/v1'; // Production URL
 
