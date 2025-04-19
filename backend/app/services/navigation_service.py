@@ -126,49 +126,71 @@ class NavigationService:
         return warnings
 
     async def is_pickup_location_complex(self, order_context: OrderContext) -> bool:
-         """
-         Checks if the pickup location is likely complex (mall, airport, etc.)
-         using Places API.
-         """
-         place_id = order_context.passenger_pickup_place_id
-         address = order_context.passenger_pickup_address
+        """
+        Checks if the pickup location is likely complex (mall, airport, etc.)
+        using Places API Details (preferred) or Geocoding results.
 
-         if not place_id and not address:
-              logger.warning("Cannot check location complexity without Place ID or address.")
-              return False # Assume not complex if no info
+        Args:
+            order_context: The order context containing pickup Place ID or address.
 
-         details = None
-         if place_id:
-              try:
-                   details = await self.maps_client.get_place_details(place_id, fields=['types'])
-              except NavigationError:
-                   logger.warning(f"Failed to get Place Details for ID {place_id}. Proceeding without type check.")
-              except Exception as e:
-                    logger.error(f"Unexpected error getting Place Details for {place_id}", exc_info=True)
+        Returns:
+            True if the location is likely complex, False otherwise.
+        """
+        place_id = order_context.passenger_pickup_place_id
+        address = order_context.passenger_pickup_address
+        location_identifier = address or f"Place ID {place_id}" if place_id else "Unknown Location"
 
-         # If no details from place_id or place_id wasn't provided, try geocoding address
-         if not details and address:
-              try:
-                   geo_result = await self.maps_client.geocode_address(address)
-                   if geo_result:
-                        # Use types from geocoding result (might be less specific than Places Details)
-                        details = {"types": geo_result.get("types", [])}
-                        logger.debug(f"Using types from Geocoding for complexity check: {details['types']}")
-              except NavigationError:
-                   logger.warning(f"Failed to geocode address '{address}' for complexity check.")
-              except Exception as e:
-                    logger.error(f"Unexpected error geocoding address '{address}'", exc_info=True)
+        if not place_id and not address:
+            logger.warning(
+                f"Cannot check location complexity for order {order_context.order_id}: No Place ID or address provided.")
+            return False  # Assume not complex if no info
 
+        details = None
+        place_types_found = None
 
-         if details and details.get("types"):
-              place_types = set(details["types"])
-              # Check for intersection with our complex types set
-              if place_types.intersection(COMPLEX_PLACE_TYPES):
-                   logger.info(f"Pickup location '{address or place_id}' identified as complex based on types: {place_types.intersection(COMPLEX_PLACE_TYPES)}")
-                   return True
-              else:
-                    logger.info(f"Pickup location '{address or place_id}' types ({place_types}) do not indicate complexity.")
+        # 1. Try Place Details using Place ID (most reliable)
+        if place_id:
+            logger.info(f"Checking complexity for '{location_identifier}' using Place ID: {place_id}")
+            try:
+                # Request 'types' field specifically
+                details = await self.maps_client.get_place_details(place_id, fields=['types'])
+                if details and details.get("types"):
+                    place_types_found = set(details["types"])
+                    logger.debug(f"Types found via Place Details: {place_types_found}")
+            except NavigationError as e:
+                logger.warning(
+                    f"Failed to get Place Details for ID {place_id} during complexity check: {e}. Will try geocoding address if available.")
+            except Exception as e:
+                logger.error(f"Unexpected error getting Place Details for {place_id} during complexity check",
+                             exc_info=True)
 
-         # Default to not complex if type check fails or yields no results
-         logger.info(f"Could not determine complexity for '{address or place_id}'. Assuming not complex.")
-         return False
+        # 2. If Place Details failed or no Place ID, try Geocoding the address
+        if not place_types_found and address:
+            logger.info(f"Checking complexity for '{location_identifier}' by geocoding address.")
+            try:
+                geo_result = await self.maps_client.geocode_address(address)
+                if geo_result and geo_result.get("types"):
+                    # Use types from geocoding result (might be less specific)
+                    place_types_found = set(geo_result["types"])
+                    logger.debug(f"Types found via Geocoding: {place_types_found}")
+            except NavigationError as e:
+                logger.warning(f"Failed to geocode address '{address}' for complexity check: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error geocoding address '{address}' for complexity check", exc_info=True)
+
+        # 3. Check if found types intersect with our complex types list
+        if place_types_found:
+            complex_matches = place_types_found.intersection(COMPLEX_PLACE_TYPES)
+            if complex_matches:
+                logger.info(
+                    f"Pickup location '{location_identifier}' identified as COMPLEX based on types: {complex_matches}")
+                return True
+            else:
+                logger.info(
+                    f"Pickup location '{location_identifier}' types ({place_types_found}) do not indicate complexity.")
+                return False
+        else:
+            # Default to not complex if type check fails or yields no results
+            logger.info(
+                f"Could not determine complexity for '{location_identifier}' based on available info. Assuming NOT complex.")
+            return False

@@ -13,11 +13,16 @@ google-maps-routing
 google-generativeai
 googlemaps
 
-# Audio/Numeric
-pydub
+# For noise reduction
+tensorflow
+tensorflow_hub
+librosa
+numpy
+scipy
 noisereduce
-scipy # Dependency for noisereduce
-numpy # Dependency for noisereduce
+soundfile
+
+deepfilternet
 
 # Computer Vision/ML for Drowsiness
 opencv-python

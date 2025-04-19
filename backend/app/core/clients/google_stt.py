@@ -55,85 +55,121 @@ class GoogleSttClient:
 
         recognition_audio = speech.RecognitionAudio(content=audio_data)
 
-        # Configure for auto-detection, potentially biased by hint or supported list
-        possible_languages = list(set([lang.lower() for lang in self.settings.SUPPORTED_LANGUAGES]))
-        if language_code_hint and language_code_hint.lower() in possible_languages:
-             # Prioritize the hint if it's supported
-             possible_languages.insert(0, language_code_hint.lower())
-        # Ensure default is included if not already there
-        if self.settings.DEFAULT_LANGUAGE_CODE.lower() not in possible_languages:
-            possible_languages.append(self.settings.DEFAULT_LANGUAGE_CODE.lower())
+        default_lang = self.settings.DEFAULT_LANGUAGE_CODE
+        supported_langs = self.settings.SUPPORTED_LANGUAGES or []  # Handle empty list
+
+        # Create the list of alternatives (all supported except the default one)
+        # Compare using lowercase to avoid case sensitivity issues, but use original case for API
+        normalized_default_lang = default_lang.lower()
+        alternative_langs_for_api = [
+            lang for lang in supported_langs if lang.lower() != normalized_default_lang
+        ]
+        # --------------------------------------------------------------------
 
         logger.debug(f"STT Config - Model: {self.settings.STT_MODEL}, "
                      f"Punctuation: {self.settings.STT_ENABLE_AUTOMATIC_PUNCTUATION}, "
                      f"Encoding: {input_encoding.name}, Rate: {sample_rate_hertz}, "
-                     f"Possible Languages: {possible_languages[:5]}...") # Log first few
+                     f"Primary Lang: {default_lang}, "
+                     f"Alternative Langs ({len(alternative_langs_for_api)}): {alternative_langs_for_api[:5]}..., "  # Log first few alternatives
+                     f"Hint provided: {language_code_hint or 'None'}")
 
         config = speech.RecognitionConfig(
             encoding=input_encoding,
             sample_rate_hertz=sample_rate_hertz,
-            language_code=possible_languages[0], # Primary language set for basic config
-            alternative_language_codes=possible_languages[1:], # Others for auto-detection
+            language_code=default_lang,  # Use the fixed default language
+            alternative_language_codes=alternative_langs_for_api,  # Use other supported languages as alternatives
             enable_automatic_punctuation=self.settings.STT_ENABLE_AUTOMATIC_PUNCTUATION,
-            use_enhanced=True if self.settings.STT_MODEL else False, # Use enhanced if model specified
+            use_enhanced=True if self.settings.STT_MODEL else False,
             model=self.settings.STT_MODEL if self.settings.STT_MODEL else None,
-            # Speech adaptation can be added here if configured in settings
-            # adaptation=speech.SpeechAdaptation(...)
+            # adaptation=... # Add if needed
         )
 
+        recognition_audio = speech.RecognitionAudio(content=audio_data)
         request = speech.RecognizeRequest(config=config, audio=recognition_audio)
 
         try:
+            # Log the config being sent (optional, can be verbose)
+            # try:
+            #     config_dict = type(config).to_dict(config)
+            #     logger.debug(f"Sending RecognitionConfig to Google STT API: {json.dumps(config_dict, indent=2)}")
+            # except Exception:
+            #      logger.debug(f"Sending RecognitionConfig to Google STT API (raw): {config}")
+
             logger.info("Sending request to Google STT API...")
             response = await self.client.recognize(request=request)
+            # Log the raw response object - helpful for debugging empty transcripts/detection issues
+            logger.debug(f"Raw Google STT API response object: {response}")
             logger.info("Received response from Google STT API.")
 
-            # Process results
+            # --- Process results (Mostly same as 'not working' version, but applied to correct config) ---
             transcript = ""
-            detected_language = None
-            highest_confidence = -1.0
+            # Store the detected language code exactly as returned by the API (original case)
+            detected_language_bcp47 = None
+            highest_confidence = -1.0  # Keep track of confidence
 
             if response.results:
-                # Find the best result (usually the first one if alternatives aren't requested heavily)
-                # Check language code of the most confident alternative
                 best_result = response.results[0]
+                # Get language code directly from the result object if available
                 if best_result.language_code:
-                     detected_language = best_result.language_code
-                     logger.debug(f"STT result language code: {detected_language}")
+                    detected_language_bcp47 = best_result.language_code
+                    logger.debug(f"STT result language code directly from result: '{detected_language_bcp47}'")
+                else:
+                    # Sometimes language code might be on the alternative, check later
+                    logger.debug("Language code not found directly on the STT result object.")
 
-                # Concatenate transcripts from alternatives within the best result
-                for alternative in best_result.alternatives:
-                     # Using the alternative with highest confidence, though often only one is returned without explicit settings
-                     if alternative.confidence > highest_confidence:
-                         transcript = alternative.transcript
-                         highest_confidence = alternative.confidence
-                         logger.debug(f"Transcript selected (confidence: {highest_confidence:.2f}): '{transcript[:50]}...'")
-                         if not detected_language and hasattr(alternative, 'language_code'):
-                            detected_language = alternative.language_code
+                # Process alternatives for transcript and confidence
+                if best_result.alternatives:
+                    # Often only one alternative is returned by default, but iterate just in case
+                    for i, alternative in enumerate(best_result.alternatives):
+                        logger.debug(
+                            f"Alternative {i}: Confidence={alternative.confidence:.4f}, Transcript='{alternative.transcript[:50]}...'")
+                        if alternative.confidence > highest_confidence:
+                            transcript = alternative.transcript
+                            highest_confidence = alternative.confidence
+                            # If language wasn't on the main result, check the best alternative
+                            if not detected_language_bcp47 and hasattr(alternative,
+                                                                       'language_code') and alternative.language_code:
+                                detected_language_bcp47 = alternative.language_code
+                                logger.debug(
+                                    f"Detected language '{detected_language_bcp47}' obtained from best alternative.")
 
-            if not transcript and detected_language:
-                logger.warning(f"STT returned detected language '{detected_language}' but an empty transcript.")
-            elif not transcript and not detected_language:
-                 logger.warning("STT returned empty transcript and no detected language.")
-            elif not detected_language:
-                 logger.warning(f"STT returned transcript but no detected language: '{transcript[:50]}...'")
+                    logger.debug(f"Selected transcript: '{transcript[:50]}...' (Confidence: {highest_confidence:.4f})")
+                else:
+                    logger.warning("STT result contained no alternatives to extract transcript from.")
 
+            else:
+                logger.warning("STT API response contained no results.")
 
-            # Fallback or correction logic for language code if needed
-            if detected_language and detected_language.lower() not in [l.lower() for l in self.settings.SUPPORTED_LANGUAGES]:
-                logger.warning(f"STT detected language '{detected_language}' which is not in the explicitly supported list. Proceeding anyway.")
-            elif not detected_language:
-                logger.warning(f"STT failed to detect language. Falling back to default: {self.settings.DEFAULT_LANGUAGE_CODE}")
-                # Decide if you want to return the default or None
-                # detected_language = self.settings.DEFAULT_LANGUAGE_CODE # Option 1: Assume default
-                detected_language = None # Option 2: Indicate failure
+            # --- Log warnings based on detection outcome ---
+            if not transcript and detected_language_bcp47:
+                logger.warning(f"STT returned detected language '{detected_language_bcp47}' but an empty transcript.")
+            elif not transcript and not detected_language_bcp47:
+                logger.warning("STT returned empty transcript and no detected language.")
+            elif transcript and not detected_language_bcp47:
+                logger.warning(
+                    f"STT returned transcript but failed to detect language. Transcript: '{transcript[:50]}...'")
 
-            return transcript.strip(), detected_language
+            # Optional: Check if detected language is within the *expected* supported list (using lowercase comparison)
+            if detected_language_bcp47:
+                normalized_detected = detected_language_bcp47.lower()
+                normalized_supported = [lang.lower() for lang in supported_langs]
+                normalized_default = default_lang.lower()
+                if normalized_detected not in normalized_supported and normalized_detected != normalized_default:
+                    logger.warning(
+                        f"Detected language '{detected_language_bcp47}' is not in the configured SUPPORTED_LANGUAGES list nor is it the DEFAULT_LANGUAGE_CODE. Proceeding anyway.")
 
+            # Return the transcript and the detected language code (original case)
+            return transcript.strip(), detected_language_bcp47
+
+        except InvalidArgument as e:
+            logger.error(
+                f"Invalid argument for STT API. Processed audio or config likely invalid? Rate={sample_rate_hertz}Hz, Encoding={input_encoding.name}. Error: {e}",
+                exc_info=True)
+            # You could add more details from 'e' if needed
+            raise InvalidRequestError(f"Invalid configuration or data for STT request: {e}", original_exception=e)
         except GoogleAPIError as e:
             logger.error(f"Google STT API error: {e}", exc_info=True)
             raise TranscriptionError(f"STT API request failed: {e}", original_exception=e)
         except Exception as e:
             logger.error(f"Unexpected error during STT transcription: {e}", exc_info=True)
-            # Catch potential asyncio issues or client errors not covered by GoogleAPIError
             raise TranscriptionError(f"An unexpected error occurred during transcription: {e}", original_exception=e)

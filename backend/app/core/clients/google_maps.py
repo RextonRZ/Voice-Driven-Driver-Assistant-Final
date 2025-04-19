@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 import asyncio
 from google.api_core.exceptions import GoogleAPIError, InvalidArgument
+import functools
 
 from ..config import Settings
 from ..exception import NavigationError, ConfigurationError, InvalidRequestError
@@ -19,7 +20,7 @@ COMPLEX_PLACE_TYPES = {
     "airport", "amusement_park", "bus_station", "hospital", "library",
     "light_rail_station", "shopping_mall", "stadium", "subway_station",
     "tourist_attraction", "train_station", "transit_station", "university",
-    "zoo", "department_store", "parking" # Add others as needed
+    "zoo", "department_store", "parking" , "convention_center", "port"
 }
 
 class GoogleMapsClient:
@@ -281,32 +282,35 @@ class GoogleMapsClient:
         logger.info(f"Geocoding address using legacy client: '{address}'")
         try:
             loop = asyncio.get_running_loop()
-            geocode_result = await loop.run_in_executor(
-                None,
+            geocode_func_with_kwargs = functools.partial(
                 self.legacy_client.geocode,
-                address,
                 region=self.settings.MAPS_DEFAULT_REGION
             )
+
+            geocode_result = await loop.run_in_executor(
+                None,
+                geocode_func_with_kwargs,
+                address
+            )
             if geocode_result:
-                # Return the first result, expecting it has geometry and place_id
                 first_result = geocode_result[0]
-                logger.info(f"Geocoding successful. Place ID: {first_result.get('place_id')}")
+                logger.info(
+                    f"Geocoding successful. Place ID: {first_result.get('place_id')}, Types: {first_result.get('types', [])}")
                 return {
                     "geometry": first_result.get("geometry", {}),
                     "place_id": first_result.get("place_id"),
                     "formatted_address": first_result.get("formatted_address"),
-                    "types": first_result.get("types", [])
-                 }
+                    "types": first_result.get("types", [])  # Return types from geocoding
+                }
             else:
                 logger.warning(f"Geocoding returned no results for address: '{address}'")
                 return None
         except googlemaps.exceptions.ApiError as e:
-             logger.error(f"Google Geocoding API error: {e}", exc_info=True)
-             raise NavigationError(f"Geocoding API request failed: {e}", original_exception=e)
+            logger.error(f"Google Geocoding API error: {e}", exc_info=True)
+            raise NavigationError(f"Geocoding API request failed: {e}", original_exception=e)
         except Exception as e:
             logger.error(f"Unexpected error during geocoding: {e}", exc_info=True)
             raise NavigationError(f"An unexpected error occurred during geocoding: {e}", original_exception=e)
-
 
     async def get_place_details(
         self,
@@ -318,7 +322,7 @@ class GoogleMapsClient:
 
         Args:
             place_id: The Google Maps Place ID.
-            fields: List of fields to request (recommended for efficiency).
+            fields: List of fields to request (recommended for efficiency). Ensure 'types' is included for complexity check.
 
         Returns:
             A dictionary containing the requested place details, or None if not found/error.
@@ -326,22 +330,27 @@ class GoogleMapsClient:
         if not place_id:
             raise InvalidRequestError("Place ID is required to get details.")
 
-        # Define default fields if none provided
+        # Ensure 'types' is always requested for our complexity check logic
+        request_fields = set(fields or [])
+        request_fields.add('types') # Ensure 'types' is present
+        # Add other useful defaults if fields is None
         if fields is None:
-            fields = ['place_id', 'name', 'formatted_address', 'type', 'geometry'] # Add 'types' for gate check
+             request_fields.update(['place_id', 'name', 'formatted_address', 'geometry'])
 
-        logger.info(f"Getting Place Details using legacy client for Place ID: '{place_id}', Fields: {fields}")
+        final_fields_list = list(request_fields)
+
+        logger.info(f"Getting Place Details using legacy client for Place ID: '{place_id}', Fields: {final_fields_list}")
         try:
             loop = asyncio.get_running_loop()
             place_result = await loop.run_in_executor(
                 None,
                 self.legacy_client.place,
                 place_id=place_id,
-                fields=fields,
+                fields=final_fields_list,
                 # language= ? # Consider user's language?
             )
             if place_result and place_result.get('result'):
-                logger.info(f"Place Details retrieved successfully for {place_id}.")
+                logger.info(f"Place Details retrieved successfully for {place_id}. Types: {place_result.get('result', {}).get('types')}")
                 return place_result.get('result')
             else:
                 logger.warning(f"Places API returned no result for Place ID: '{place_id}'. Response: {place_result}")
@@ -356,7 +365,6 @@ class GoogleMapsClient:
         except Exception as e:
             logger.error(f"Unexpected error getting place details: {e}", exc_info=True)
             raise NavigationError(f"An unexpected error occurred getting place details: {e}", original_exception=e)
-
 
     # --- Reroute Check (Needs adaptation) ---
     async def check_for_reroute(

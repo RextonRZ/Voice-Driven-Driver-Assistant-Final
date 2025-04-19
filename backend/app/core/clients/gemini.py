@@ -4,6 +4,7 @@ import google.generativeai as genai
 import json
 from typing import List, Optional, Dict
 import asyncio
+import functools
 
 from ..config import Settings
 from ..exception import NluError, ConfigurationError
@@ -100,12 +101,18 @@ class GeminiClient:
 
             # Gemini API calls are often synchronous in the SDK, run in executor
             loop = asyncio.get_running_loop()
+            # Create a partial function for send_message with keyword args
+            send_message_with_args = functools.partial(
+                chat.send_message,
+                generation_config=generation_config,
+                # stream=False # If you uncomment this, add it here too
+            )
+
+            # Run the partial function, passing the main content positionally
             response = await loop.run_in_executor(
-                 None,
-                 chat.send_message,
-                 prompt_to_send,
-                 generation_config=generation_config,
-                 # stream=False # Ensure we get the full response
+                None,
+                send_message_with_args,  # Run the partial function
+                prompt_to_send  # Pass the positional argument
             )
 
             # Check for blocked content or errors
