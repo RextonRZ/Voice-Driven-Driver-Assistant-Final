@@ -17,7 +17,9 @@ googlemaps
 pydub
 noisereduce
 scipy # Dependency for noisereduce
-numpy # Dependency for noisereduce
+numpy>=1.20.0 # Dependency for noisereduce
+SpeechRecognition>=3.8.1
+PyAudio>=0.2.11
 
 # Computer Vision/ML for Drowsiness
 opencv-python
@@ -26,3 +28,7 @@ ultralytics
 torch
 torchvision
 pyyaml
+
+# Additional Dependencies
+openwakeword==0.5.0
+websockets>=10.0

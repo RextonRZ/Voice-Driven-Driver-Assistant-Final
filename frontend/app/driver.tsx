@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react'
-import { Button, StatusBar, StyleSheet, Text, TouchableOpacity, View, TouchableWithoutFeedback, Animated, TextStyle } from 'react-native'
+import { Button, StatusBar, StyleSheet, Text, TouchableOpacity, View, TouchableWithoutFeedback, Animated, TextStyle, FlatList, Alert } from 'react-native'
 import MapView, { Marker, Region, PROVIDER_GOOGLE, Polyline } from 'react-native-maps'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Feather, FontAwesome5, Ionicons, MaterialIcons } from '@expo/vector-icons'
@@ -8,6 +8,8 @@ import * as Location from 'expo-location'
 import { router } from 'expo-router'
 import { MapsService } from '../services/mapsService'
 import { ScrollView } from 'react-native-gesture-handler'
+import { Audio } from 'expo-av'
+import * as FileSystem from 'expo-file-system'
 
 export default function Driver() {
     const [region, setRegion] = useState<Region | null>(null)
@@ -31,6 +33,15 @@ export default function Driver() {
     const [messages, setMessages] = useState<string[]>([]);
     const [isNavigatingToCustomer, setIsNavigatingToCustomer] = useState(false);
     const [countdown, setCountdown] = useState(5);
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const chatBubbleOpacity = useRef(new Animated.Value(0)).current;
+    const [recording, setRecording] = useState<Audio.Recording | null>(null);
+    const [isRecording, setIsRecording] = useState(false);
+    const [audioUri, setAudioUri] = useState<string | null>(null);
+    const [recordings, setRecordings] = useState<{ uri: string, filename: string, date: Date }[]>([]);
+    const [showRecordingsModal, setShowRecordingsModal] = useState(false);
+    const [playingAudio, setPlayingAudio] = useState<Audio.Sound | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
 
     const mapRef = useRef<MapView>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
@@ -39,7 +50,6 @@ export default function Driver() {
     const opacityAnimation = useRef(new Animated.Value(0.6)).current;
     const snapPoints = useMemo(() => ['18%', '62%'], []);
 
-    // Start the pulse animation for loading effects
     useEffect(() => {
         if (loading) {
             Animated.loop(
@@ -61,19 +71,31 @@ export default function Driver() {
         }
     }, [region]);
 
-    // Customer details
+    useEffect(() => {
+        const getAudioPermissions = async () => {
+            try {
+                const { status } = await Audio.requestPermissionsAsync();
+                if (status !== 'granted') {
+                    console.error('Permission to access audio was denied');
+                }
+            } catch (error) {
+                console.error('Error requesting audio permissions:', error);
+            }
+        };
+
+        getAudioPermissions();
+    }, []);
+
     const customer =
     {
         name: "Angel Chan",
         rating: "4.5",
         phone: "+6011 9876 5432",
-        // origin: "Faculty of Computer Science and Information Technology",
         origin: "Tun Ahmad Zaidi Residential College",
         destination: "Mid Valley Megamall North Court Entrance",
         fare: "RM 15.00",
     };
 
-    // Find current user location
     useEffect(() => {
         const setupMap = async () => {
             try {
@@ -105,7 +127,6 @@ export default function Driver() {
         setupMap()
     }, [])
 
-    // Find the customer origin
     useEffect(() => {
         if (region && apiKey) {
             setCurrentMarker({
@@ -113,35 +134,31 @@ export default function Driver() {
                 longitude: region.longitude,
             });
 
-            // Fetch the customer's origin coordinates
             MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
                 setDestinationMarker(coords);
             });
 
             setTimeout(() => {
-                setShowModal(true); // Show the modal after a delay
+                setShowModal(true);
             }, 2000);
         }
     }, [region, apiKey]);
 
-    // Animation for the path
     const startAnimation = (length: number) => {
         animatedValue.setValue(0);
         Animated.loop(
             Animated.timing(animatedValue, {
                 toValue: length,
-                duration: 5000, // 5 seconds for the full animation
+                duration: 5000,
                 useNativeDriver: false,
             })
         ).start();
 
-        // Use an Animated.event to update the state
         animatedValue.addListener(({ value }) => {
             setAnimatedIndex(Math.floor(value));
         });
     };
 
-    // Decode polyline function
     const decodePolyline = (encoded: string) => {
         let points: { latitude: number; longitude: number }[] = [];
         let index = 0, len = encoded.length;
@@ -173,25 +190,21 @@ export default function Driver() {
         return points;
     };
 
-    // Modify your showMessageModal function
     const handleShowMessageModal = () => {
         setShowMessageModal(true);
-        setCurrentIndex(0); // Reset the bottom sheet index
-        bottomSheetRef.current?.snapToIndex(0); // Open the bottom sheet
-        // Reset messages when opening the modal
+        setCurrentIndex(0);
+        bottomSheetRef.current?.snapToIndex(0);
         setMessages([]);
     };
 
-    // Function to close message modal
     const closeMessageModal = () => {
         setShowMessageModal(false);
     };
 
-    // Approve customer button
     const handleApprove = async () => {
-        setApprove(true); // Set approve to true
-        setShowModal(false); // Close the modal
-        setIsNavigatingToCustomer(true); // Start navigating to the customer
+        setApprove(true);
+        setShowModal(false);
+        setIsNavigatingToCustomer(true);
 
         if (!region) return;
 
@@ -201,44 +214,38 @@ export default function Driver() {
                 longitude: region.longitude,
             });
 
-            // Fetch the customer's origin coordinates
             MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
                 setDestinationMarker(coords);
             });
         }
 
         const origin = `${region.latitude},${region.longitude}`;
-        const customerOrigin = customer.origin; // Use the customer's origin
+        const customerOrigin = customer.origin;
 
         try {
             const customerCoordsResponse = await MapsService.getPlaceCoordinates(customerOrigin);
-            setCustomerCoords(customerCoordsResponse); // Save customer's coordinates
+            setCustomerCoords(customerCoordsResponse);
 
             const directions = await MapsService.getDirections(origin, `${customerCoordsResponse.latitude},${customerCoordsResponse.longitude}`);
 
-            // Extract estimated time in traffic
             const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
             console.log(`Estimated time in traffic: ${durationInTraffic}`);
             setDurationInTraffic(durationInTraffic);
 
-            // Extract distance
             const distanceText = directions.routes[0].legs[0].distance.text;
             console.log(`Distance: ${distanceText}`);
             setDistance(distanceText);
 
-            // Decode the polyline and update the route
             const points = decodePolyline(directions.routes[0].overview_polyline.points);
             console.log('Decoded polyline points:', points);
             setRouteCoordinates(points);
 
-            // Start the animation
             startAnimation(points.length);
         } catch (error) {
             console.error('Error fetching route to customer:', error);
         }
     };
 
-    // Check if the driver is close to the customer
     useEffect(() => {
         if (isNavigatingToCustomer && customerCoords) {
             const interval = setInterval(async () => {
@@ -247,9 +254,7 @@ export default function Driver() {
                     location.coords.latitude,
                     location.coords.longitude,
                     customerCoords.latitude,
-                    // 3.131705,
                     customerCoords.longitude,
-                    // 101.651224
                 );
 
                 if (distanceToCustomer < 50) {
@@ -263,8 +268,8 @@ export default function Driver() {
     }, [isNavigatingToCustomer, customerCoords]);
 
     const startCountdown = () => {
-        setShowCountdownModal(true); // Show the countdown modal
-        let timer = 5; // 5-second countdown
+        setShowCountdownModal(true);
+        let timer = 5;
         setCountdown(timer);
 
         const interval = setInterval(() => {
@@ -273,24 +278,23 @@ export default function Driver() {
 
             if (timer === 0) {
                 clearInterval(interval);
-                setShowCountdownModal(false); // Hide the countdown modal
+                setShowCountdownModal(false);
 
-                // Update markers
                 if (customerCoords) {
-                    setCurrentMarker(customerCoords); // Move "You Are Here" marker to customer's origin
+                    setCurrentMarker(customerCoords);
                 }
 
                 MapsService.getPlaceCoordinates(customer.destination).then((coords) => {
-                    setDestinationMarker(coords); // Move destination marker to customer's destination
+                    setDestinationMarker(coords);
                 });
 
-                navigateToDestination(); // Navigate to the customer's destination
+                navigateToDestination();
             }
-        }, 1000); // 1-second interval
+        }, 1000);
     };
 
     const navigateToDestination = async () => {
-        setIsNavigatingToCustomer(false); // Stop navigating to the customer
+        setIsNavigatingToCustomer(false);
 
         const customerCoords = await MapsService.getPlaceCoordinates(customer.origin);
         const destinationCoords = await MapsService.getPlaceCoordinates(customer.destination);
@@ -302,78 +306,262 @@ export default function Driver() {
             );
             const points = decodePolyline(directions.routes[0].overview_polyline.points);
 
-            setRouteCoordinates(points); // Set the route to the destination
+            setRouteCoordinates(points);
 
-            // Extract estimated time in traffic
             const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
             console.log(`Estimated time in traffic: ${durationInTraffic}`);
             setDurationInTraffic(durationInTraffic);
 
-            // Extract distance
             const distanceText = directions.routes[0].legs[0].distance.text;
             console.log(`Distance: ${distanceText}`);
             setDistance(distanceText);
 
-            // Start the animation
             startAnimation(points.length);
 
-            // Monitor proximity to the destination
             const interval = setInterval(async () => {
                 const location = await Location.getCurrentPositionAsync({});
                 const distanceToDestination = MapsService.calculateDistance(
                     location.coords.latitude,
                     location.coords.longitude,
                     destinationCoords.latitude,
-                    // 3.131705,
                     destinationCoords.longitude,
-                    // 101.651224
                 );
 
-                if (distanceToDestination < 50) { // Within 50 meters
+                if (distanceToDestination < 50) {
                     clearInterval(interval);
-                    handleDestinationReached(); // Handle destination reached
+                    handleDestinationReached();
                 }
-            }, 2000); // Check every 2 seconds
+            }, 2000);
         } catch (error) {
             console.error('Error fetching route to destination:', error);
         }
     };
 
     const handleDestinationReached = () => {
-        // Show the success modal
         setShowSuccessModal(true);
 
-        // Reset all states after a delay
         setTimeout(() => {
-            setShowSuccessModal(false); // Hide the success modal
-            animatedValue.stopAnimation(); // Stop the animation
-            setRouteCoordinates([]); // Clear the path
-            setCurrentMarker(null); // Remove the current marker
-            setDestinationMarker(null); // Remove the destination marker
-            setApprove(false); // Reset approval
-            setCustomerCoords(null); // Clear customer coordinates
-            setDistance(null); // Clear distance
-            setDurationInTraffic(null); // Clear duration
-        }, 5000); // 5-second delay
+            setShowSuccessModal(false);
+            animatedValue.stopAnimation();
+            setRouteCoordinates([]);
+            setCurrentMarker(null);
+            setDestinationMarker(null);
+            setApprove(false);
+            setCustomerCoords(null);
+            setDistance(null);
+            setDurationInTraffic(null);
+        }, 5000);
     };
 
-    // Header and Bottom Sheet styles
+    const startRecording = async () => {
+        try {
+            console.log('Starting audio recording...');
+            await Audio.setAudioModeAsync({
+                allowsRecordingIOS: true,
+                playsInSilentModeIOS: true,
+            });
+
+            const { recording } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY
+            );
+
+            setRecording(recording);
+            setIsRecording(true);
+
+            setShowVoiceModal(true);
+            chatBubbleOpacity.setValue(1);
+        } catch (error) {
+            console.error('Failed to start recording:', error);
+        }
+    };
+
+    const stopRecording = async () => {
+        if (!recording) return;
+
+        try {
+            console.log('Stopping recording...');
+            await recording.stopAndUnloadAsync();
+
+            await Audio.setAudioModeAsync({
+                allowsRecordingIOS: false,
+            });
+
+            const uri = recording.getURI();
+            console.log('Recording stopped and stored at', uri);
+
+            if (uri) {
+                saveAudioAsWav(uri);
+            }
+
+            setRecording(null);
+            setIsRecording(false);
+
+            Animated.timing(chatBubbleOpacity, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+            }).start(() => {
+                setShowVoiceModal(false);
+            });
+        } catch (error) {
+            console.error('Failed to stop recording:', error);
+        }
+    };
+
+    const saveAudioAsWav = async (uri: string) => {
+        try {
+            const audioDir = `${FileSystem.documentDirectory}audiofiles/`;
+
+            const dirInfo = await FileSystem.getInfoAsync(audioDir);
+            if (!dirInfo.exists) {
+                console.log("Creating audio directory...");
+                await FileSystem.makeDirectoryAsync(audioDir, { intermediates: true });
+            }
+
+            const timestamp = new Date().getTime();
+            const fileName = `recording_${timestamp}.wav`;
+            const filePath = `${audioDir}${fileName}`;
+
+            await FileSystem.copyAsync({
+                from: uri,
+                to: filePath
+            });
+
+            console.log(`Audio saved successfully at: ${filePath}`);
+            setAudioUri(filePath);
+
+            loadRecordings();
+        } catch (error) {
+            console.error('Error saving audio file:', error);
+        }
+    };
+
+    const loadRecordings = async () => {
+        try {
+            const audioDir = `${FileSystem.documentDirectory}audiofiles/`;
+
+            const dirInfo = await FileSystem.getInfoAsync(audioDir);
+            if (!dirInfo.exists) {
+                console.log("Audio directory doesn't exist yet");
+                return;
+            }
+
+            const files = await FileSystem.readDirectoryAsync(audioDir);
+
+            const wavFiles = files.filter(file => file.endsWith('.wav'));
+
+            const recordingsData = await Promise.all(
+                wavFiles.map(async (filename) => {
+                    const fileUri = `${audioDir}${filename}`;
+                    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+                    return {
+                        uri: fileUri,
+                        filename: filename,
+                        date: 'modificationTime' in fileInfo && fileInfo.modificationTime
+                            ? new Date(fileInfo.modificationTime * 1000)
+                            : new Date()
+                    };
+                })
+            );
+
+            recordingsData.sort((a, b) => b.date.getTime() - a.date.getTime());
+            setRecordings(recordingsData);
+
+        } catch (error) {
+            console.error('Error loading recordings:', error);
+        }
+    };
+
+    const playRecording = async (uri: string) => {
+        try {
+            if (playingAudio) {
+                await playingAudio.unloadAsync();
+            }
+
+            console.log(`Playing recording: ${uri}`);
+            const { sound } = await Audio.Sound.createAsync({ uri });
+            setPlayingAudio(sound);
+            setIsPlaying(true);
+
+            await sound.playAsync();
+
+            sound.setOnPlaybackStatusUpdate((status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                    setIsPlaying(false);
+                }
+            });
+
+        } catch (error) {
+            console.error('Error playing recording:', error);
+        }
+    };
+
+    const deleteRecording = async (uri: string) => {
+        try {
+            await FileSystem.deleteAsync(uri);
+            console.log(`Deleted recording: ${uri}`);
+            loadRecordings();
+        } catch (error) {
+            console.error('Error deleting recording:', error);
+        }
+    };
+
+    const confirmDeleteRecording = (uri: string, filename: string) => {
+        Alert.alert(
+            "Delete Recording",
+            `Are you sure you want to delete ${filename}?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    onPress: () => deleteRecording(uri),
+                    style: "destructive"
+                }
+            ]
+        );
+    };
+
+    useEffect(() => {
+        loadRecordings();
+    }, []);
+
+    const handleVoiceAssistant = () => {
+        if (!isRecording) {
+            setShowVoiceModal(true);
+            Animated.sequence([
+                Animated.timing(chatBubbleOpacity, {
+                    toValue: 1,
+                    duration: 300,
+                    useNativeDriver: true,
+                }),
+                Animated.delay(3000),
+                Animated.timing(chatBubbleOpacity, {
+                    toValue: 0,
+                    duration: 300,
+                    useNativeDriver: true,
+                })
+            ]).start(() => {
+                setShowVoiceModal(false);
+            });
+        }
+    };
+
     const headerStyle = {
-        backgroundColor: '#00B14F', // Green for light mode
+        backgroundColor: '#00B14F',
         padding: 16,
     };
     const headerTextStyle: TextStyle = {
-        color: '#FFFFFF', // White for light mode
+        color: '#FFFFFF',
         fontSize: 20,
         fontWeight: 'bold',
     };
     const bottomSheetStyle = {
-        backgroundColor: '#FFFFFF', // White for light mode
+        backgroundColor: '#FFFFFF',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
     };
     const bottomSheetTextStyle: TextStyle = {
-        color: '#000000', // Black for light mode
+        color: '#000000',
         fontSize: 16,
         fontWeight: 'bold',
     };
@@ -382,7 +570,6 @@ export default function Driver() {
         <SafeAreaView style={{ flex: 1 }}>
             <StatusBar translucent backgroundColor="#00B14F" barStyle="dark-content" />
 
-            {/* Header */}
             <View style={headerStyle}>
                 <View className="flex-row items-center">
                     <TouchableOpacity
@@ -399,21 +586,19 @@ export default function Driver() {
             {loading ? (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EAEAEA' }}>
                     <View style={{ justifyContent: 'center', alignItems: 'center' }}>
-                        {/* Pulsing Circle */}
                         <Animated.View
                             style={[
                                 styles.pulse,
                                 {
-                                    transform: [{ scale: pulseAnim }], // Apply the pulse animation
+                                    transform: [{ scale: pulseAnim }],
                                     opacity: pulseAnim.interpolate({
                                         inputRange: [1, 1.2],
-                                        outputRange: [0.6, 0.3], // Fade out as it scales up
+                                        outputRange: [0.6, 0.3],
                                     }),
                                 },
                             ]}
                         />
 
-                        {/* Static Pin */}
                         <View style={styles.pin} />
                     </View>
                     <Text className='text-xl mt-14 font-bold'>Setting things up for you...</Text>
@@ -432,7 +617,6 @@ export default function Driver() {
                     showsMyLocationButton={false}
                     customMapStyle={lightMapStyle}
                 >
-                    {/* "You Are Here" Marker */}
                     {currentMarker && approve && (
                         <Marker
                             coordinate={currentMarker}
@@ -441,7 +625,6 @@ export default function Driver() {
                         />
                     )}
 
-                    {/* Destination Marker */}
                     {destinationMarker && approve && (
                         <Marker
                             coordinate={destinationMarker}
@@ -450,7 +633,6 @@ export default function Driver() {
                         />
                     )}
 
-                    {/* Route Polyline */}
                     {routeCoordinates.length > 0 && (
                         <Polyline
                             coordinates={routeCoordinates.slice(0, animatedIndex)}
@@ -465,19 +647,17 @@ export default function Driver() {
                 </View>
             )}
 
-            {/* Relocate Button */}
             <TouchableOpacity
                 style={styles.relocateButton}
                 onPress={() => {
                     if (region) {
-                        mapRef.current?.animateToRegion(region, 1000); // Animate to user's location
+                        mapRef.current?.animateToRegion(region, 1000);
                     }
                 }}
             >
                 <Feather name="crosshair" size={24} color="#fff" />
             </TouchableOpacity>
 
-            {/* Toggle Map Type */}
             <TouchableOpacity
                 style={styles.toggleButton}
                 onPress={() => setMapType(mapType === 'standard' ? 'hybrid' : 'standard')}
@@ -485,13 +665,175 @@ export default function Driver() {
                 <MaterialIcons name="satellite-alt" size={24} color="#fff" />
             </TouchableOpacity>
 
-            {/* Toggle Traffic */}
             <TouchableOpacity
                 style={styles.trafficButton}
                 onPress={() => setShowTraffic(!showTraffic)}
             >
                 <MaterialIcons name="traffic" size={24} color="#fff" />
             </TouchableOpacity>
+
+            <View style={styles.voiceAssistantContainer}>
+                {showVoiceModal && (
+                    <Animated.View
+                        style={[
+                            styles.chatBubble,
+                            { opacity: chatBubbleOpacity }
+                        ]}
+                    >
+                        <Text style={styles.chatBubbleText}>
+                            {isRecording ? "Recording... (release to stop)" : "How can I help?"}
+                        </Text>
+                    </Animated.View>
+                )}
+
+                <TouchableOpacity
+                    style={styles.recordingsBrowserButton}
+                    onPress={() => {
+                        loadRecordings();
+                        setShowRecordingsModal(true);
+                    }}
+                >
+                    <Feather name="list" size={20} color="#fff" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={isRecording ? styles.recordingButton : styles.voiceAssistantButton}
+                    onPress={handleVoiceAssistant}
+                    onLongPress={startRecording}
+                    onPressOut={() => {
+                        if (isRecording) {
+                            stopRecording();
+                        }
+                    }}
+                    delayLongPress={500}
+                >
+                    <FontAwesome5
+                        name={isRecording ? "stop" : "microphone"}
+                        size={20}
+                        color="#fff"
+                    />
+                </TouchableOpacity>
+            </View>
+
+            {showRecordingsModal && (
+                <View
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: 16,
+                    }}
+                >
+                    <View
+                        style={{
+                            backgroundColor: 'white',
+                            borderRadius: 12,
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowOpacity: 0.25,
+                            shadowRadius: 3.84,
+                            elevation: 5,
+                            width: '90%',
+                            maxHeight: '80%',
+                            padding: 16,
+                        }}
+                    >
+                        <View className="flex-row justify-between items-center mb-4">
+                            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Recorded Audio Files</Text>
+                            <TouchableOpacity
+                                onPress={() => setShowRecordingsModal(false)}
+                                className="h-10 w-10 rounded-full items-center justify-center"
+                            >
+                                <Feather name="x" size={24} color="#6b7280" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {recordings.length === 0 ? (
+                            <View className="py-10 items-center">
+                                <Feather name="file-text" size={48} color="#9ca3af" />
+                                <Text className="text-gray-500 mt-4 text-center">
+                                    No recordings found. Long-press the microphone button to record.
+                                </Text>
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={recordings}
+                                keyExtractor={(item) => item.uri}
+                                renderItem={({ item }) => (
+                                    <View
+                                        style={{
+                                            flexDirection: 'row',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            padding: 12,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: '#e5e7eb',
+                                        }}
+                                    >
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ fontWeight: 'medium' }} numberOfLines={1}>
+                                                {item.filename}
+                                            </Text>
+                                            <Text style={{ color: '#6b7280', fontSize: 12 }}>
+                                                {item.date.toLocaleString()}
+                                            </Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row' }}>
+                                            <TouchableOpacity
+                                                style={{
+                                                    height: 36,
+                                                    width: 36,
+                                                    borderRadius: 18,
+                                                    backgroundColor: '#00B14F',
+                                                    justifyContent: 'center',
+                                                    alignItems: 'center',
+                                                    marginRight: 8,
+                                                }}
+                                                onPress={() => playRecording(item.uri)}
+                                            >
+                                                <Feather name="play" size={16} color="#fff" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={{
+                                                    height: 36,
+                                                    width: 36,
+                                                    borderRadius: 18,
+                                                    backgroundColor: '#ef4444',
+                                                    justifyContent: 'center',
+                                                    alignItems: 'center',
+                                                }}
+                                                onPress={() => confirmDeleteRecording(item.uri, item.filename)}
+                                            >
+                                                <Feather name="trash-2" size={16} color="#fff" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
+                            />
+                        )}
+
+                        <TouchableOpacity
+                            style={{
+                                backgroundColor: '#00B14F',
+                                padding: 12,
+                                borderRadius: 8,
+                                alignItems: 'center',
+                                marginTop: 16,
+                            }}
+                            onPress={() => {
+                                loadRecordings();
+                            }}
+                        >
+                            <Text style={{ color: 'white', fontWeight: 'bold' }}>Refresh List</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
 
             {showModal && (
                 <View
@@ -591,7 +933,7 @@ export default function Driver() {
                                         borderRadius: 8,
                                         alignItems: 'center',
                                     }}
-                                    onPress={handleApprove} // Approve and navigate to customer
+                                    onPress={handleApprove}
                                 >
                                     <Text style={{ color: 'white', fontWeight: 'bold' }}>Approve</Text>
                                 </TouchableOpacity>
@@ -657,12 +999,11 @@ export default function Driver() {
                 )
             }
 
-            {/* Message Modal */}
             {showMessageModal && (
                 <View
                     style={{
                         position: 'absolute',
-                        top: 98, // Position below the header
+                        top: 98,
                         bottom: 0,
                         left: 0,
                         right: 0,
@@ -686,7 +1027,6 @@ export default function Driver() {
                             height: '70%',
                         }}
                     >
-                        {/* Modal Header */}
                         <View className="p-4 border-b border-gray-100 flex-row justify-between items-center">
                             <View className="flex-row items-center">
                                 <View className="h-10 w-10 bg-green-100 rounded-full items-center justify-center mr-3">
@@ -702,7 +1042,6 @@ export default function Driver() {
                             </TouchableOpacity>
                         </View>
 
-                        {/* Messages Container */}
                         <ScrollView
                             className="flex-1 p-4"
                             contentContainerStyle={{ flexGrow: 1 }}
@@ -714,15 +1053,12 @@ export default function Driver() {
 
                         </ScrollView>
 
-                        {/* Message Input */}
                         <View className="p-3 border-t border-gray-100 flex-row justify-between">
                             <View className="flex-row w-10/12 rounded-full border border-accent bg-gray-100 px-4 py-2">
                                 <Text className="text-gray-500">Send a message...</Text>
                             </View>
                             <TouchableOpacity
                                 className="h-10 w-10 bg-green-50 rounded-full items-center justify-center mr-2"
-                            // onPress={sendMessage}
-                            // disabled={isSending}
                             >
                                 <Feather name="send" size={18} color="#00B14F"></Feather>
                             </TouchableOpacity>
@@ -760,9 +1096,9 @@ export default function Driver() {
                         <Feather name="check-circle" size={48} color="#00B14F" />
                         <View
                             style={{
-                                justifyContent: 'center', // Center content vertically
-                                alignItems: 'center', // Center content horizontally
-                                marginTop: 8, // Add spacing between the icon and text
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginTop: 8,
                             }}
                         >
                             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' }}>
@@ -788,7 +1124,6 @@ export default function Driver() {
 
                 <TouchableWithoutFeedback
                     onPress={() => {
-                        // Toggle between the first and second snap points
                         const nextIndex = currentIndex === 0 ? 1 : 0;
                         bottomSheetRef.current?.snapToIndex(nextIndex);
                     }}
@@ -797,11 +1132,10 @@ export default function Driver() {
                         flex: 1,
                         alignItems: 'center',
                         padding: 15,
-                        backgroundColor: '#FFFFFF', // White for light mode
+                        backgroundColor: '#FFFFFF',
                         borderTopLeftRadius: 20,
                         borderTopRightRadius: 20
                     }}>
-                        {/* 18% View */}
                         {!approve ? (
                             <>
                                 <View className="pt-2 flex-row justify-center">
@@ -831,7 +1165,6 @@ export default function Driver() {
                             </>
                         )}
 
-                        {/* 62% View */}
                         {approve && (
                             <View className="pt-6 w-full">
                                 <View
@@ -858,7 +1191,7 @@ export default function Driver() {
                                         shadowRadius: 4,
                                         flexDirection: 'row',
                                         alignItems: 'center',
-                                        marginVertical: 8, // Add spacing around the container
+                                        marginVertical: 8,
                                     }}
                                 >
                                     <View className="h-12 w-12 bg-green-100 rounded-full items-center justify-center mr-3">
@@ -980,6 +1313,71 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 3,
     },
+    voiceAssistantContainer: {
+        position: 'absolute',
+        right: 15,
+        bottom: '22%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 999,
+    },
+    recordingsBrowserButton: {
+        backgroundColor: '#3b82f6',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        marginRight: 10,
+    },
+    voiceAssistantButton: {
+        backgroundColor: '#00B14F',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+    },
+    recordingButton: {
+        backgroundColor: '#FF3B30',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+    },
+    chatBubble: {
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: 10,
+        marginRight: 10,
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 3,
+        position: 'relative',
+        maxWidth: 200,
+    },
+    chatBubbleText: {
+        color: '#333',
+        fontSize: 14,
+    },
     toggleButtonText: {
         color: '#333',
         fontWeight: 'bold',
@@ -989,7 +1387,7 @@ const styles = StyleSheet.create({
         height: 80,
         width: 80,
         borderRadius: 40,
-        backgroundColor: '#00A651', // grab green
+        backgroundColor: '#00A651',
     },
     pin: {
         height: 20,
@@ -1004,7 +1402,6 @@ const styles = StyleSheet.create({
     },
 });
 
-// Map Styles
 const lightMapStyle = [
     {
         elementType: 'geometry',
