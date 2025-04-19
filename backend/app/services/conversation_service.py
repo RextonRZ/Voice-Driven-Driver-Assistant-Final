@@ -168,31 +168,73 @@ class ConversationService:
                       response_text_nlu = "Okay, message sent." # Placeholder success
 
 
-            elif intent == NluIntent.ASK_GATE_INFO:
 
+            elif intent == NluIntent.ASK_GATE_INFO:
+                logger.info("Processing ASK_GATE_INFO intent.")
+                # 1. Validate Context
                 if not order_context:
                     response_text_nlu = "I need an active order to ask about the gate."
+                    logger.warning("ASK_GATE_INFO failed: No order context provided.")
                 elif not order_context.passenger_phone_number:
+                    # Check phone number even for simulation, as it's needed eventually
                     response_text_nlu = "I need the passenger's contact number from the order details to ask about the gate."
+                    logger.warning("ASK_GATE_INFO failed: Missing passenger phone number in order context.")
                 elif not order_context.passenger_pickup_address and not order_context.passenger_pickup_place_id:
-                    response_text_nlu = "I need the pickup address or Place ID from the order details to check the location type."
+                    response_text_nlu = "I need the pickup address or Place ID from the order details to determine if the location is complex."
+                    logger.warning("ASK_GATE_INFO failed: Missing pickup address and Place ID in order context.")
                 else:
-                    # Check if the location is complex using the NavigationService helper
-                    is_complex = await self.navigation_service.is_pickup_location_complex(order_context)
-                    if is_complex:
-                        # Location is likely complex, proceed with asking
-                        passenger_number = order_context.passenger_phone_number
-                        pickup_location_name = order_context.passenger_pickup_address or f"Place ID {order_context.passenger_pickup_place_id}"
-                        message = f"Hi, this is your Grab driver reaching {pickup_location_name}. As it seems like a large place, could you please let me know which specific gate, entrance, or lobby I should meet you at? Thanks!"
-                        logger.info(
-                            f"Placeholder: Sending 'ask gate' message for complex location to {passenger_number}.")
-                        # success = await self.communication_service.send_sms(passenger_number, message) # Uncomment when communication service exists
-                        # response_text_nlu = "Okay, the pickup location seems complex. I've sent a message to the passenger asking for the specific gate or entrance." if success else "Sorry, I couldn't send the message to the passenger."
-                        response_text_nlu = "Okay, the pickup location seems complex. I've sent a message to the passenger asking for the specific gate or entrance."  # Placeholder success
-                    else:
-                        # Location doesn't seem complex, maybe skip or just confirm arrival
-                        logger.info("Pickup location doesn't seem complex. Skipping specific 'ask gate' message.")
-                        response_text_nlu = "Okay, I'm heading to the pickup location. It doesn't seem like a place with multiple gates, but I'll let you know when I arrive."
+                    # 2. Check Location Complexity using NavigationService helper
+                    logger.info(f"Checking pickup location complexity for order {order_context.order_id}.")
+                    try:
+                        is_complex = await self.navigation_service.is_pickup_location_complex(order_context)
+                        # 3. Handle based on complexity
+                        if is_complex:
+                            # Location is likely complex, proceed with asking
+                            passenger_number = order_context.passenger_phone_number  # Already checked it exists
+                            # Construct location name for the message
+                            pickup_location_name = order_context.passenger_pickup_address or f"the pickup location (Place ID: {order_context.passenger_pickup_place_id})"
+                            # Construct the message to be sent (can be refined)
+                            message = f"Hi, this is your Grab driver reaching {pickup_location_name}. As it seems like a large place, could you please let me know which specific gate, entrance, or lobby I should meet you at? Thanks!"
+                            logger.info(
+                                f"Pickup location deemed complex. Preparing to send 'ask gate' message to {passenger_number}. Message: '{message}'")
+                            # --- Placeholder: Send message via Communication Service ---
+                            # if self.communication_service:
+                            #     try:
+                            #         logger.debug(f"Calling CommunicationService.send_sms for ASK_GATE_INFO.")
+                            #         success = await self.communication_service.send_sms(passenger_number, message)
+                            #         if success:
+                            #             logger.info("Successfully sent 'ask gate' SMS via CommunicationService.")
+                            #             response_text_nlu = "Okay, the pickup location seems complex. I've sent a message to the passenger asking for the specific gate or entrance."
+                            #         else:
+                            #             logger.error("CommunicationService.send_sms returned False for ASK_GATE_INFO.")
+                            #             response_text_nlu = "Sorry, I couldn't send the message to the passenger asking about the gate."
+                            #     except CommunicationError as comm_err:
+                            #         logger.error(f"CommunicationError sending 'ask gate' SMS: {comm_err}", exc_info=True)
+                            #         response_text_nlu = f"Sorry, I encountered an error trying to message the passenger: {comm_err.message}"
+                            # else:
+                            #     logger.warning("CommunicationService not available/configured. Skipping actual SMS send for ASK_GATE_INFO.")
+                            #     # Provide placeholder success response if no communication service
+                            #     response_text_nlu = "Okay, the pickup location seems complex. I've sent a message to the passenger asking for the specific gate or entrance. (Simulation)"
+                            # --- Using only placeholder logging for now ---
+                            logger.info(f"Placeholder: Simulating sending SMS to {passenger_number}: '{message}'")
+                            response_text_nlu = "Okay, the pickup location seems complex. I've sent a message to the passenger asking for the specific gate or entrance."
+                            # --- End Placeholder ---
+                        else:
+                            # Location doesn't seem complex, skip specific 'ask gate' message
+                            logger.info(
+                                "Pickup location doesn't seem complex based on checks. Skipping specific 'ask gate' message.")
+                            # Provide a suitable response confirming the driver's request but indicating no message was sent for this reason.
+                            response_text_nlu = "Okay, I checked the pickup location. It doesn't seem like a place with multiple gates, so I haven't messaged the passenger about it. I'm heading there now."
+                            # Alternative simpler response:
+                            # response_text_nlu = "Okay, I'm heading to the pickup location."
+                    except NavigationError as nav_err:
+                        logger.error(f"NavigationError during complexity check for ASK_GATE_INFO: {nav_err}",
+                                     exc_info=True)
+                        response_text_nlu = "Sorry, I had trouble checking the details of the pickup location."
+                    except Exception as complex_err:
+                        logger.error(f"Unexpected error during complexity check for ASK_GATE_INFO: {complex_err}",
+                                     exc_info=True)
+                        response_text_nlu = "Sorry, an unexpected error occurred while checking the pickup location."
 
             elif intent == NluIntent.CHECK_FLOOD:
                  location_hint = entities.get("location_hint", "current route")

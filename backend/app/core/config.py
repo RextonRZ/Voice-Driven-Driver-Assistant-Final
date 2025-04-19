@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     NLU_PROCESSING_LANGUAGE: str = "en" # Target language for Gemini processing
     DEFAULT_LANGUAGE_CODE: str = "en-US" # Fallback BCP-47 language
     SUPPORTED_LANGUAGES: List[str] = [ # BCP-47 codes for STT language detection hint
-        "en-us", "en-sg", "en-ph", "ms-my", "id-id",
-        "fil-ph", "th-th", "vi-vn", "km-kh", "my-mm", "cmn-Hans-CN", "cmn-CN"
+        "en-SG", "en-PH", "ms-MY", "id-ID",
+        "fil-PH", "th-TH", "vi-VN", "km-KH", "my-MM", "cmn-Hans-CN", "cmn-CN", "ta-IN"
     ]
 
     # --- Assistant Behavior ---
@@ -56,22 +56,27 @@ Output ONLY a JSON object with the following structure:
 """
 
     # --- STT Settings ---
-    STT_MODEL: Optional[str] = "telephony" # Use "telephony" or "latest_long" for potentially better noise robustness
+    STT_MODEL: Optional[str] = "latest_long"
     STT_ENABLE_AUTOMATIC_PUNCTUATION: bool = True
-    # Add specific adaptation settings if needed (phrases, classes)
-    # STT_SPEECH_ADAPTATION_PHRASES: List[str] = ["Grab", "Changi Airport", "Orchard Road"]
 
     # --- TTS Settings ---
     DEFAULT_TTS_SPEAKING_RATE: float = 1.0
     TTS_AUDIO_ENCODING: str = "MP3" # Or LINEAR16 if preferred
     DEFAULT_TTS_VOICE_NAME: Optional[str] = "en-US-Standard-C" # Fallback voice
-    TTS_LANGUAGE_VOICE_MAP: Dict[str, str] = { # BCP-47 lowercased : Voice Name
-        "en-us": "en-US-Standard-C", "en-sg": "en-SG-Standard-A",
-        "en-ph": "en-PH-Standard-A", "ms-my": "ms-MY-Standard-A",
-        "id-id": "id-ID-Standard-A", "fil-ph": "fil-PH-Standard-A",
-        "th-th": "th-TH-Standard-A", "vi-vn": "vi-VN-Standard-D",
-        "km-kh": "km-KH-Standard-A", "my-mm": "my-MM-Standard-A",
-        "cmn-cn":"cmn-CN-Standard-A", "cmn-hans-cn": "cmn-Hans-CN-Standard-A",
+    TTS_LANGUAGE_VOICE_MAP: Dict[str, str] = {  # BCP-47 lowercased : Voice Name
+        "en-us": "en-US-Standard-C",
+        "en-sg": "en-US-Standard-B",  # <<< MAKE SURE THIS IS CORRECT and SAVED
+        "en-ph": "en-PH-Standard-A",
+        "ms-my": "ms-MY-Standard-A",
+        "id-id": "id-ID-Standard-A",
+        "fil-ph": "fil-PH-Standard-A",
+        "th-th": "th-TH-Standard-A",
+        "vi-vn": "vi-VN-Standard-D",
+        "km-kh": "km-KH-Standard-A",
+        "my-mm": "my-MM-Standard-A",
+        "cmn-cn": "cmn-CN-Standard-A",
+        "cmn-hans-cn": "cmn-Hans-CN-Standard-A",
+        "ta-in": "ta-IN-Standard-A"
     }
 
     # --- Navigation Settings ---

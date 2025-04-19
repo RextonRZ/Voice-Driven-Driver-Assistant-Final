@@ -4,6 +4,7 @@ from google.cloud import translate_v2 as translate # v2 is simpler for basic use
 # from google.cloud import translate # v3beta is more complex but offers more features
 from google.api_core.exceptions import GoogleAPIError
 import asyncio
+import functools
 
 from ..config import Settings, settings as global_settings
 from ..exception import TranslationError, ConfigurationError, InvalidRequestError
@@ -67,13 +68,18 @@ class GoogleTranslateClient:
              loop = asyncio.get_running_loop()
              logger.info(f"Requesting translation to '{target_language}' (Source: '{source_language or 'auto'}'). Running in executor.")
 
-             result = await loop.run_in_executor(
-                 None, # Use default executor
+             translate_with_args = functools.partial(
                  self.client.translate,
-                 text,
                  target_language=target_language,
-                 source_language=source_language or '', # API expects empty string for auto-detect
-                 format_='text' # Ensure plain text handling
+                 source_language=source_language or '',
+                 format_='text'
+             )
+
+             # Run the partial function, passing the 'text' argument positionally
+             result = await loop.run_in_executor(
+                 None,
+                 translate_with_args,  # Run the partial function
+                 text  # Pass the main positional argument
              )
              logger.info(f"Translation successful. Detected source: '{result.get('detectedSourceLanguage', 'N/A') if isinstance(result, dict) else [r.get('detectedSourceLanguage', 'N/A') for r in result]}'")
              # The client returns dict or list of dicts matching the desired structure
