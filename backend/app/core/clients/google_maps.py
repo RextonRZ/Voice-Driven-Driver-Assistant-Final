@@ -6,6 +6,7 @@ from google.protobuf.duration_pb2 import Duration
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 import asyncio
+import os
 from google.api_core.exceptions import GoogleAPIError, InvalidArgument
 import functools
 
@@ -31,6 +32,7 @@ class GoogleMapsClient:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.api_key = os.getenv("GOOGLE_MAPS_API_KEY", settings.GOOGLE_MAPS_API_KEY)
         if not settings.GOOGLE_MAPS_API_KEY or settings.GOOGLE_MAPS_API_KEY == "YOUR_GOOGLE_MAPS_API_KEY":
             logger.error("GOOGLE_MAPS_API_KEY is not configured.")
             raise ConfigurationError("GOOGLE_MAPS_API_KEY must be set.")

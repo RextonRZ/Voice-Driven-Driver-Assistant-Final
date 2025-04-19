@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL - adjust based on your development environment
 // const API_URL = 'http://10.0.2.2:8000/api/v1'; // Use this for Android emulator
-const API_URL = 'http://192.168.89.129:8000/api/v1';  // Use this for Samsung A52s (Vanness)
+const API_URL = 'http://10.164.104.149:8000/api';  // Use this for Samsung A52s (Vanness)
 // const API_URL = 'http://localhost:8000/api/v1'; // Use this for iOS simulator
 // const API_URL = 'https://your-production-api.com/api/v1'; // Production URL
 
@@ -60,11 +60,12 @@ export class MapsService {
   static async getDirections(origin: string, destination: string): Promise<any> {
     try {
       console.log('Requesting directions with origin:', origin, 'destination:', destination);
-      const response = await axios.get(`${API_URL}/maps/directions`, {
+      const response = await axios.get(`${API_URL}/navigation/directions`, {
         params: { origin, destination },
       });
+      const responseData = await response.data;
       console.log('Directions response:', response.data);
-      return response.data;
+      return responseData;
     } catch (error) {
       console.error('Error fetching directions:', error);
       throw error;
@@ -77,7 +78,7 @@ export class MapsService {
   static async getPlaceCoordinates(placeName: string): Promise<{ latitude: number; longitude: number }> {
     try {
       console.log(`Fetching coordinates for place: ${placeName}`);
-      const response = await axios.get(`${API_URL}/maps/place-coordinates`, {
+      const response = await axios.get(`${API_URL}/navigation/place-coordinates`, {
         params: { placeName },
       });
 

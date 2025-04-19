@@ -15,7 +15,7 @@ from ..core.exception import NavigationError, InvalidRequestError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/navigation",
+    prefix="/api/navigation",
     tags=["Navigation Features"],
 )
 
@@ -72,3 +72,42 @@ async def check_reroute(
     except Exception as e:
         logger.exception(f"Unexpected error during reroute check: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during reroute check.")
+
+@router.get(
+    "/directions",
+    summary="Get directions between two locations",
+    description="Fetches directions from the origin to the destination using Google Maps Directions API.",
+)
+def get_directions(
+    origin: str = Query(..., description="Origin coordinates (latitude,longitude)"),
+    destination: str = Query(..., description="Destination coordinates (latitude,longitude)"),
+    navigation_service: NavigationService = Depends(get_navigation_service)
+):
+    try:
+        directions = navigation_service.fetch_directions(origin, destination)
+        return {"status": "OK", "directions": directions}
+    except NavigationError as e:
+        logger.error(f"Error fetching directions: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching directions: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")
+
+@router.get(
+    "/place-coordinates",
+    summary="Get coordinates of a place",
+    description="Fetches the coordinates of a place using Google Places API.",
+)
+async def get_coordinates(
+    place_name: str = Query(..., alias='placeName', description="Name of the place to search for"),
+    navigation_service: NavigationService = Depends(get_navigation_service)
+):
+    try:
+        coordinates = await navigation_service.fetch_coordinates(place_name)
+        return {"status": "OK", "coordinates": coordinates}
+    except NavigationError as e:
+        logger.error(f"Error fetching place coordinates: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching place coordinates: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred.")

@@ -1,5 +1,7 @@
 # backend/services/navigation_service.py
+import os
 import logging
+import requests
 from typing import Optional, Tuple, List, Any, Dict
 
 # Use the refactored client
@@ -57,7 +59,54 @@ class NavigationService:
         except Exception as e:
             logger.error(f"Unexpected error in get_route_and_eta: {e}", exc_info=True)
             raise NavigationError(f"An unexpected error occurred during routing: {e}", original_exception=e)
+    
+    def fetch_directions(self, origin: str, destination: str) -> dict:
+        """
+        Fetch directions from Google Maps Directions API.
+        """
+        try:
+            api_key = os.getenv("GOOGLE_MAPS_API_KEY")  # Assume API key is in settings
+            url = "https://maps.googleapis.com/maps/api/directions/json"
+            params = {
+                "origin": origin,
+                "destination": destination,
+                "key": api_key,
+                "departure_time": "now",
+            }
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
+            if data["status"] != "OK":
+                raise NavigationError(f"Error fetching directions: {data.get('error_message', 'Unknown error')}")
+
+            return data
+        except requests.RequestException as e:
+            raise NavigationError(f"Error fetching directions: {str(e)}")
+        
+    async def fetch_coordinates(self, place_name: str) -> dict:
+        """
+        Fetch the coordinates of a place using Google Places API.
+        """
+        try:
+            api_key = os.getenv("GOOGLE_MAPS_API_KEY")  # Assume API key is in settings
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                "query": place_name,
+                "key": api_key,
+            }
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            if data["status"] != "OK" or not data["results"]:
+                raise NavigationError(f"Place not found: {place_name}")
+
+            location = data["results"][0]["geometry"]["location"]
+            return {"latitude": location["lat"], "longitude": location["lng"]}
+        except requests.RequestException as e:
+            raise NavigationError(f"Error fetching place coordinates: {str(e)}")
+        
     async def check_for_reroute(
         self,
         current_location: Tuple[float, float],

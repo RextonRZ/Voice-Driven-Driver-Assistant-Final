@@ -34,8 +34,8 @@ export default function Driver() {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [animatedIndex, setAnimatedIndex] = useState(0);
     const [countdown, setCountdown] = useState(5);
-    const [steps, setSteps] = useState<any[]>([]); 
-    const [currentStepIndex, setCurrentStepIndex] = useState(0); 
+    const [steps, setSteps] = useState<any[]>([]);
+    const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [nextInstruction, setNextInstruction] = useState<string | null>(null);
 
     const mapRef = useRef<MapView>(null);
@@ -221,63 +221,82 @@ export default function Driver() {
 
     // Approve customer button
     const handleApprove = async () => {
-        setApprove(true); // Set approve to true
-        setShowModal(false); // Close the modal
-        setIsNavigatingToCustomer(true); // Start navigating to the customer
+        setApprove(true);
+        setShowModal(false);
+        setIsNavigatingToCustomer(true);
 
-        if (!region) return;
+        if (!region) {
+            console.warn("No region defined");
+            return;
+        }
 
-        if (currentMarker === null || destinationMarker === null) {
+        // Set current marker if not available
+        if (currentMarker === null) {
             setCurrentMarker({
                 latitude: region.latitude,
                 longitude: region.longitude,
             });
-
-            // Fetch the customer's origin coordinates
-            MapsService.getPlaceCoordinates(customer.origin).then((coords) => {
-                setDestinationMarker(coords);
-            });
         }
 
         const origin = `${region.latitude},${region.longitude}`;
-        const customerOrigin = customer.origin; // Use the customer's origin
 
         try {
-            const customerCoordsResponse = await MapsService.getPlaceCoordinates(customerOrigin);
-            setCustomerCoords(customerCoordsResponse); // Save customer's coordinates
+            // Get customer coordinates
+            const customerCoordsResponse = await MapsService.getPlaceCoordinates(customer.origin);
+            if (!customerCoordsResponse || !customerCoordsResponse.latitude || !customerCoordsResponse.longitude) {
+                throw new Error("Invalid customer coordinates");
+            }
 
-            const directions = await MapsService.getDirections(origin, `${customerCoordsResponse.latitude},${customerCoordsResponse.longitude}`);
+            setCustomerCoords(customerCoordsResponse);
+            setDestinationMarker(customerCoordsResponse);
 
-            const steps = directions.routes[0].legs[0].steps.map((step: any) => ({
+            // Get directions
+            const destination = `${customerCoordsResponse.latitude},${customerCoordsResponse.longitude}`;
+            const directions = await MapsService.getDirections(origin, destination);
+
+            const route = directions.directions.routes[0];
+
+            const leg = route.legs[0];
+            if (!leg || !leg.steps || !Array.isArray(leg.steps)) {
+                throw new Error("Invalid leg structure");
+            }
+
+            // Process steps
+            const steps = leg.steps.map((step: Step) => ({
                 ...step,
-                plain_instructions: stripHtml(step.html_instructions), // Add plain text instructions
-                distance: step.distance,
+                plain_instructions: step.html_instructions ? stripHtml(step.html_instructions) : "Continue",
+                distance: step.distance || { text: "Unknown distance", value: 0 },
             }));
 
-            console.log('Steps:', steps[0].plain_instructions); // Log the steps for debugging
-
-            setSteps(steps); // Save steps for navigation
-            setNextInstruction(steps[0]?.plain_instructions || ''); // Set the first instruction
-
-            // Extract estimated time in traffic
-            const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
-            setDurationInTraffic(durationInTraffic);
-
-            // Extract distance
-            const distanceText = directions.routes[0].legs[0].distance.text;
-
-            setDistance(distanceText);
-
-            // Decode the polyline and update the route
-            const points = decodePolyline(directions.routes[0].overview_polyline.points);
-            setRouteCoordinates(points);
-
             setSteps(steps);
+            setNextInstruction(steps[0]?.plain_instructions || 'Start navigation');
 
-            // Start the animation
-            startAnimation(points.length);
+            // Extract trip info
+            if (leg.duration_in_traffic && leg.duration_in_traffic.text) {
+                setDurationInTraffic(leg.duration_in_traffic.text);
+            }
+
+            if (leg.distance && leg.distance.text) {
+                setDistance(leg.distance.text);
+            }
+
+            // Process route polyline
+            if (route.overview_polyline && route.overview_polyline.points) {
+                const points = decodePolyline(route.overview_polyline.points);
+                if (Array.isArray(points) && points.length > 0) {
+                    setRouteCoordinates(points);
+                    startAnimation(points.length);
+                } else {
+                    console.warn("Decoded polyline has no valid points");
+                }
+            } else {
+                console.warn("No polyline points found in the route");
+            }
+
         } catch (error) {
             console.error('Error fetching route to customer:', error);
+            // Consider adding user-facing error handling here
+            setIsNavigatingToCustomer(false);
         }
     };
 
@@ -340,26 +359,44 @@ export default function Driver() {
                 `${destinationCoords.latitude},${destinationCoords.longitude}`
             );
 
-            const steps = directions.routes[0].legs[0].steps.map((step: any) => ({
+            const route = directions.directions.routes[0];
+
+            const leg = route.legs[0];
+            if (!leg || !leg.steps || !Array.isArray(leg.steps)) {
+                throw new Error("Invalid leg structure");
+            }
+
+            // Process steps
+            const steps = leg.steps.map((step: Step) => ({
                 ...step,
-                plain_instructions: stripHtml(step.html_instructions),
+                plain_instructions: step.html_instructions ? stripHtml(step.html_instructions) : "Continue",
+                distance: step.distance || { text: "Unknown distance", value: 0 },
             }));
-            setSteps(steps); // Save steps for navigation
-            setNextInstruction(steps[0]?.plain_instructions || ''); // Set the first instruction
 
-            const points = decodePolyline(directions.routes[0].overview_polyline.points);
-            setRouteCoordinates(points); // Set the route to the destination
+            setSteps(steps);
+            setNextInstruction(steps[0]?.plain_instructions || 'Start navigation');
 
-            // Extract estimated time in traffic
-            const durationInTraffic = directions.routes[0].legs[0].duration_in_traffic.text;
-            setDurationInTraffic(durationInTraffic);
+            // Extract trip info
+            if (leg.duration_in_traffic && leg.duration_in_traffic.text) {
+                setDurationInTraffic(leg.duration_in_traffic.text);
+            }
 
-            // Extract distance
-            const distanceText = directions.routes[0].legs[0].distance.text;
-            setDistance(distanceText);
+            if (leg.distance && leg.distance.text) {
+                setDistance(leg.distance.text);
+            }
 
-            // Start the animation
-            startAnimation(points.length);
+            // Process route polyline
+            if (route.overview_polyline && route.overview_polyline.points) {
+                const points = decodePolyline(route.overview_polyline.points);
+                if (Array.isArray(points) && points.length > 0) {
+                    setRouteCoordinates(points);
+                    startAnimation(points.length);
+                } else {
+                    console.warn("Decoded polyline has no valid points");
+                }
+            } else {
+                console.warn("No polyline points found in the route");
+            }
 
             // Monitor proximity to the destination
             const interval = setInterval(async () => {
@@ -446,6 +483,7 @@ export default function Driver() {
                 setSteps([]);
                 setCurrentStepIndex(0);
                 setNextInstruction(null);
+                closeMessageModal();
             }, 10000);
         }, 5000);
     };
@@ -845,6 +883,7 @@ export default function Driver() {
                         justifyContent: 'flex-start',
                         alignItems: 'center',
                         padding: 16,
+                        zIndex: 3
                     }}
                 >
                     <View
@@ -1280,3 +1319,26 @@ const lightMapStyle = [
         stylers: [{ color: '#EAEAEA' }],
     },
 ];
+
+type Step = {
+    html_instructions: string;
+    distance: {
+        text: string;
+        value: number;
+    };
+    duration: {
+        text: string;
+        value: number;
+    };
+    start_location: {
+        lat: number;
+        lng: number;
+    };
+    end_location: {
+        lat: number;
+        lng: number;
+    };
+    polyline: {
+        points: string;
+    };
+};

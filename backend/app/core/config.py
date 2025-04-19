@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     # --- API Keys & Credentials ---
     # GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None # Recommended: Set this env var externally for ADC
-    GEMINI_API_KEY: str = "YOUR_GEMINI_API_KEY" # Required for NLU
-    GOOGLE_MAPS_API_KEY: str = "YOUR_GOOGLE_MAPS_API_KEY" # Required for Navigation
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY") # Required for NLU
+    GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY") # Required for Navigation
     # TWILIO_ACCOUNT_SID: Optional[str] = None # Required if using Twilio for SMS/Calls
     # TWILIO_AUTH_TOKEN: Optional[str] = None # Required if using Twilio
     # TWILIO_PHONE_NUMBER: Optional[str] = None # Required if using Twilio
