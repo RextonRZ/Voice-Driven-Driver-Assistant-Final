@@ -45,6 +45,9 @@ export default function Driver() {
     const [apiResponse, setApiResponse] = useState<string | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [sessionId] = useState(`driver-session-${Date.now()}`);
+    const [listeningStatus, setListeningStatus] = useState<'idle' | 'listening' | 'processing'>('idle');
+    const [userQuery, setUserQuery] = useState<string | null>(null);
+    const [dots, setDots] = useState<string>('');
 
     const mapRef = useRef<MapView>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
@@ -372,26 +375,60 @@ export default function Driver() {
         }, 5000);
     };
 
+    const playOutputAudio = async (audioPath: string) => {
+        try {
+            console.log('Playing output audio from path:', audioPath);
+            
+            // Construct the full URL to the audio file
+            const audioUrl = `http://172.20.10.3:8000${audioPath}`;
+            console.log('Full audio URL:', audioUrl);
+            
+            // Create and play the sound
+            const { sound } = await Audio.Sound.createAsync({ uri: audioUrl });
+            await sound.playAsync();
+            
+            sound.setOnPlaybackStatusUpdate((status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                    console.log('Audio playback finished');
+                    sound.unloadAsync();
+                }
+            });
+        } catch (error) {
+            console.error('Error playing output audio:', error);
+        }
+    };
+
     const sendAudioToAPI = async (audioUri: string) => {
         try {
             console.log('Sending audio to API:', audioUri);
             setIsProcessing(true);
+            setListeningStatus('processing');
+            setApiResponse(null);
 
             const fileInfo = await FileSystem.getInfoAsync(audioUri);
             if (!fileInfo.exists) {
-                console.error("Audio file doesn't exist");
+                console.error("Audio file doesn't exist at URI:", audioUri);
                 setApiResponse("Error: Audio file not found.");
                 setIsProcessing(false);
+                setListeningStatus('idle');
                 return;
             }
 
+            console.log(`Audio file size: ${fileInfo.size} bytes`);
+            
+            const requestSessionId = `driver-session-${Date.now()}`;
+            
             const formData = new FormData();
-            formData.append('session_id', sessionId);
+            formData.append('session_id', requestSessionId);
 
             const fileExtension = audioUri.split('.').pop() || 'm4a';
+            console.log(`File extension detected: ${fileExtension}`);
+            
+            const fileName = `recording_${Date.now()}.${fileExtension}`;
+            
             formData.append('audio_data', {
                 uri: audioUri,
-                name: `recording.${fileExtension}`,
+                name: fileName,
                 type: `audio/${fileExtension === 'wav' ? 'wav' : 'x-m4a'}`,
             } as any);
 
@@ -412,42 +449,130 @@ export default function Driver() {
                 }));
             }
 
-            console.log("Sending request to backend...");
+            console.log("Sending request to backend with session ID:", requestSessionId);
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-            const response = await fetch('http://172.20.10.3:8000/assistant/interact', {
-                method: 'POST',
-                body: formData,
-            });
-
-            console.log(`API response status: ${response.status}`);
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error(`API error: ${response.status} - ${errorText}`);
-                throw new Error(`API responded with status ${response.status}`);
+            try {
+                const response = await fetch('http://172.20.10.3:8000/assistant/interact', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                console.log(`API response status: ${response.status}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`API error (${response.status}):`, errorText);
+                    throw new Error(`API responded with status ${response.status}: ${errorText}`);
+                }
+                
+                try {
+                    const data = await response.json();
+                    console.log("API response data:", data);
+                    
+                    if (data.request_transcription) {
+                        setUserQuery(data.request_transcription);
+                    }
+                    
+                    setApiResponse(data.response_text || "No response from assistant.");
+                    
+                    // Play the audio if available
+                    if (data.audio_file_path) {
+                        console.log('Audio file path received:', data.audio_file_path);
+                        await playOutputAudio(data.audio_file_path);
+                    }
+                    
+                    showChatBubbleWithTimeout(8000);
+                    
+                } catch (jsonError) {
+                    console.error("Failed to parse JSON response:", jsonError);
+                    setApiResponse("Received response but couldn't parse it.");
+                }
+                
+            } catch (fetchError: any) {
+                clearTimeout(timeoutId);
+                
+                if (fetchError.name === 'AbortError') {
+                    console.error('Request timed out');
+                    setApiResponse("Request timed out. Please try again.");
+                } else {
+                    console.error('Network error during fetch:', fetchError);
+                    setApiResponse("Network error. Please check your connection.");
+                }
             }
-
-            const data = await response.json();
-            console.log("API response data:", data);
-            setApiResponse(data.response_text || "No response from assistant.");
-
         } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.error('Request timed out');
-                setApiResponse("Request timed out. Please try again.");
-            } else {
-                console.error('Error sending audio to API:', error);
-                setApiResponse("Error processing your request: " + (error.message || "Unknown error"));
-            }
+            console.error('Error in sendAudioToAPI:', error);
+            setApiResponse(`Error: ${error.message || "Unknown error occurred"}`);
         } finally {
             setIsProcessing(false);
+            setListeningStatus('idle');
         }
+    };
+
+    const getChatBubbleMessage = () => {
+        if (listeningStatus === 'listening') {
+            return `Listening${dots}`;
+        } else if (listeningStatus === 'processing' && userQuery) {
+            return `"${userQuery}"`;
+        } else if (listeningStatus === 'processing') {
+            return `Processing${dots}`;
+        } else {
+            return apiResponse || "How can I help?";
+        }
+    };
+
+    useEffect(() => {
+        let dotInterval: NodeJS.Timeout;
+        
+        if (listeningStatus === 'listening' || listeningStatus === 'processing') {
+            dotInterval = setInterval(() => {
+                setDots(prev => {
+                    if (prev.length >= 3) return '';
+                    return prev + '.';
+                });
+            }, 500);
+        }
+        
+        return () => {
+            if (dotInterval) clearInterval(dotInterval);
+        };
+    }, [listeningStatus]);
+
+    const showChatBubbleWithTimeout = (duration: number) => {
+        setShowVoiceModal(true);
+        Animated.timing(chatBubbleOpacity, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+        }).start();
+        
+        const bubbleTimeout = setTimeout(() => {
+            Animated.timing(chatBubbleOpacity, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+            }).start(() => {
+                setShowVoiceModal(false);
+            });
+        }, duration);
+        
+        return () => clearTimeout(bubbleTimeout);
     };
 
     const startRecording = async () => {
         try {
             if (recording) {
-                await recording.stopAndUnloadAsync();
+                console.log('Stopping existing recording before starting new one');
+                try {
+                    await recording.stopAndUnloadAsync();
+                } catch (e) {
+                    console.log('Error stopping previous recording:', e);
+                }
                 setRecording(null);
             }
 
@@ -455,20 +580,29 @@ export default function Driver() {
             await Audio.setAudioModeAsync({
                 allowsRecordingIOS: true,
                 playsInSilentModeIOS: true,
+                staysActiveInBackground: true,
+                interruptionModeIOS: 1, // Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX
+                interruptionModeAndroid: 1, // Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX
             });
 
             const { recording: newRecording } = await Audio.Recording.createAsync(
                 Audio.RecordingOptionsPresets.HIGH_QUALITY
             );
 
+            console.log('Recording started successfully');
             setRecording(newRecording);
             setIsRecording(true);
+
+            setListeningStatus('listening');
+            setUserQuery(null);
+            setApiResponse(null);
 
             setShowVoiceModal(true);
             chatBubbleOpacity.setValue(1);
         } catch (error: any) {
             console.error('Failed to start recording:', error);
             Alert.alert("Recording Error", "Could not start recording: " + (error.message || "Unknown error"));
+            setListeningStatus('idle');
         }
     };
 
@@ -484,6 +618,10 @@ export default function Driver() {
 
             await Audio.setAudioModeAsync({
                 allowsRecordingIOS: false,
+                playsInSilentModeIOS: true,
+                staysActiveInBackground: true,
+                interruptionModeIOS: 1, // Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX
+                interruptionModeAndroid: 1, // Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX
             });
 
             const uri = recording.getURI();
@@ -495,6 +633,7 @@ export default function Driver() {
             } else {
                 console.error("Recording URI is null");
                 setApiResponse("Error: Could not access recording.");
+                setListeningStatus('idle');
             }
 
             setRecording(null);
@@ -505,6 +644,7 @@ export default function Driver() {
             setApiResponse("Error stopping recording: " + (error.message || "Unknown error"));
             setRecording(null);
             setIsRecording(false);
+            setListeningStatus('idle');
         }
     };
 
@@ -518,10 +658,13 @@ export default function Driver() {
                 await FileSystem.makeDirectoryAsync(audioDir, { intermediates: true });
             }
 
+            const sourceExt = uri.split('.').pop() || 'm4a';
+            
             const timestamp = new Date().getTime();
-            const fileName = `recording_${timestamp}.wav`;
+            const fileName = `recording_${timestamp}.${sourceExt}`;
             const filePath = `${audioDir}${fileName}`;
 
+            console.log(`Copying audio from ${uri} to ${filePath}`);
             await FileSystem.copyAsync({
                 from: uri,
                 to: filePath
@@ -531,8 +674,10 @@ export default function Driver() {
             setAudioUri(filePath);
 
             loadRecordings();
+            return filePath;
         } catch (error) {
             console.error('Error saving audio file:', error);
+            return uri;
         }
     };
 
@@ -548,10 +693,15 @@ export default function Driver() {
 
             const files = await FileSystem.readDirectoryAsync(audioDir);
 
-            const wavFiles = files.filter(file => file.endsWith('.wav'));
+            const audioFiles = files.filter(file => 
+                file.endsWith('.wav') || 
+                file.endsWith('.m4a') || 
+                file.endsWith('.mp3') ||
+                file.endsWith('.aac')
+            );
 
             const recordingsData = await Promise.all(
-                wavFiles.map(async (filename) => {
+                audioFiles.map(async (filename) => {
                     const fileUri = `${audioDir}${filename}`;
                     const fileInfo = await FileSystem.getInfoAsync(fileUri);
                     return {
@@ -781,7 +931,7 @@ export default function Driver() {
                         ]}
                     >
                         <Text style={styles.chatBubbleText}>
-                            {isProcessing ? "Processing..." : apiResponse || "How can I help?"}
+                            {getChatBubbleMessage()}
                         </Text>
                     </Animated.View>
                 )}

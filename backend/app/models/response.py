@@ -10,6 +10,7 @@ class AssistantResponse(BaseModel):
     request_transcription: str = Field(..., description="The text transcribed from the user's input audio")
     response_text: str = Field(..., description="The generated text response from the assistant")
     response_audio: str = Field(..., description="The synthesized audio response (base64 encoded string)")
+    audio_file_path: Optional[str] = Field(None, description="Path to access the converted WAV audio file")
     detected_input_language: Optional[str] = Field(None, description="BCP-47 language code detected from the user's input audio")
     # Optional field to send structured data back to the frontend if needed
     action_result: Optional[Any] = Field(None, description="Structured result of the action performed (e.g., RouteInfo).")

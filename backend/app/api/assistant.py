@@ -1,7 +1,9 @@
 # backend/api/assistant.py
 import logging
 import json
-import time  # Add this import
+import time
+import base64
+import os
 from fastapi import (
     APIRouter,
     Depends,
@@ -12,6 +14,7 @@ from fastapi import (
     File,
     UploadFile
 )
+from fastapi.responses import FileResponse
 from typing import Optional, Tuple
 
 # Models
@@ -33,6 +36,10 @@ router = APIRouter(
     prefix="/assistant",
     tags=["Assistant Interaction"],
 )
+
+# Define a directory to save generated audio files
+AUDIO_OUTPUT_DIR = "generated_audio"
+os.makedirs(AUDIO_OUTPUT_DIR, exist_ok=True)
 
 def _parse_location(loc_str: Optional[str]) -> Optional[Tuple[float, float]]:
     """Helper to parse location string 'lat,lon' or JSON '{"lat":x, "lon":y}'."""
@@ -110,6 +117,21 @@ async def interact(
         logger.debug(f"Request model created: {request_model}")
 
         response = await conversation_service.process_interaction(request_model)
+        
+        # Convert base64 audio to WAV file
+        if response.response_audio:
+            audio_filename = f"{session_id}_{int(time.time())}.wav"
+            audio_file_path = os.path.join(AUDIO_OUTPUT_DIR, audio_filename)
+            
+            # Decode and save the audio
+            with open(audio_file_path, "wb") as audio_file:
+                audio_file.write(base64.b64decode(response.response_audio))
+            
+            logger.info(f"Generated audio saved at: {audio_file_path}")
+            
+            # Add the public path to the response
+            response.audio_file_path = f"/assistant/audio/{audio_filename}"
+        
         logger.info(f"Interaction processed successfully for session: {session_id}")
         return response
 
@@ -134,3 +156,12 @@ async def interact(
     finally:
         end_time = time.time()  # End timing
         logger.info(f"Total processing time for session {session_id}: {end_time - start_time:.2f} seconds")
+
+# Add an endpoint to serve the audio files
+@router.get("/audio/{filename}")
+async def get_audio_file(filename: str):
+    """Serve the generated audio files."""
+    file_path = os.path.join(AUDIO_OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    return FileResponse(file_path, media_type="audio/wav")
