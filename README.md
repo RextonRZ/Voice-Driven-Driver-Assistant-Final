@@ -129,38 +129,69 @@ Our objective is to build a robust voice interaction system addressing these cha
 
 ## Technology Stack
 
-### Backend
+### Backend Structure
 
-*   **Framework:** FastAPI
-*   **Language:** Python 3.10+
-*   **AI/ML Services:**
-    *   Google Cloud STT API
-    *   Google Cloud TTS API
-    *   Google Cloud Translate API v2
-    *   Google Gemini API (`gemini-2.0-flash`)
-    *   OpenAI Whisper API (Fallback for STT)
-*   **Navigation:**
-    *   Google Maps Routes API v2
-    *   Google Maps Geocoding API
-    *   Google Maps Places API
-*   **Audio Processing:** Pydub, Noisereduce, Librosa, NumPy
-*   **Drowsiness Detection:** OpenCV (`opencv-python`), MediaPipe, Ultralytics YOLOv8 (`ultralytics`)
-*   **HTTP/Async:** `httpx`, `requests` (for flood scraping)
-*   **Configuration:** Pydantic, `python-dotenv`
-*   **Web Server:** Uvicorn
-*   **Other:** `pycountry`, `certifi`
+backend/
+├── app/
+│   ├── api/              # FastAPI routers/endpoints
+│   │   ├── assistant.py
+│   │   ├── dependencies.py # Dependency injection setup
+│   │   ├── navigation.py
+│   │   └── safety.py
+│   ├── core/             # Core logic, clients, config
+│   │   ├── clients/        # Clients for external APIs (Google, OpenAI, Twilio)
+│   │   │   ├── gemini.py
+│   │   │   ├── google_maps.py
+│   │   │   ├── google_stt.py
+│   │   │   ├── google_tts.py
+│   │   │   ├── google_translate.py
+│   │   │   ├── openai_client.py
+│   │   │   └── twilio_client.py (Placeholder)
+│   │   ├── audio_enhancement.py # Noise reduction, VAD logic
+│   │   ├── config.py       # Pydantic settings model
+│   │   └── exception.py    # Custom exception classes
+│   ├── models/           # Pydantic models
+│   │   ├── internal.py     # Internal data structures (NluResult, RouteInfo, etc.)
+│   │   ├── request.py      # API request models
+│   │   └── response.py     # API response models
+│   ├── services/         # Business logic services
+│   │   ├── conversation_service.py
+│   │   ├── navigation_service.py
+│   │   ├── nlu_service.py
+│   │   ├── safety_service.py
+│   │   ├── synthesis_service.py
+│   │   ├── transcription_service.py
+│   │   └── translation_service.py
+│   ├── ml_models/        # Pre-trained models (e.g., YOLO .pt files)
+│   │   ├── detect_eye_best.pt
+│   │   └── detect_yawn_best.pt
+│   ├── main.py           # FastAPI app initialization, middleware, exception handlers
+│   └── __init__.py
+├── requirements.txt      # Python dependencies
+└── .env.example          # Example environment variables file
 
-### Frontend
+### Frontend Structure
 
-*   **Framework:** React Native (with Expo SDK)
-*   **Language:** TypeScript
-*   **Routing:** Expo Router
-*   **Mapping:** `react-native-maps`
-*   **Location:** `expo-location`
-*   **UI Components:** `@gorhom/bottom-sheet`, `react-native-gesture-handler`
-*   **Styling:** Tailwind CSS (`nativewind`), React Native StyleSheet
-*   **State Management:** React Hooks (`useState`, `useEffect`, `useRef`, etc.)
-
+frontend/
+├── app/                  # Expo Router pages
+│   │   └── ...
+│   ├── _layout.tsx       # Root layout component
+│   ├── driver.tsx        # Main driver screen component
+│   └── index.tsx         # Splash screen / initial route
+├── assets/               # Static assets (images, fonts)
+│   └── images/
+│       ├── destination-icon.png
+│       ├── origin-icon.png
+│       └── splash.png
+├── components/           # Reusable UI components (if any)
+├── services/             # Service layer for API calls, etc.
+│   └── mapsService.ts
+├── app.json              # Expo configuration
+├── babel.config.js       # Babel configuration
+├── globals.css           # Tailwind CSS global styles
+├── package.json          # Node.js dependencies
+├── tailwind.config.js    # Tailwind CSS configuration
+└── tsconfig.json         # TypeScript configuration
 ---
 
 ## Project Structure
