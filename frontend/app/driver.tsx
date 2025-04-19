@@ -995,7 +995,7 @@ export default function Driver() {
 
         } catch (error) {
             console.error('Failed to stop recording:', error);
-            setApiResponse("Error stopping recording: " + (error.message || "Unknown error"));
+            setApiResponse("Error stopping recording: " + (error || "Unknown error"));
             setRecording(null);
             // setIsRecording(false);
             setListeningStatus('idle');

@@ -8,6 +8,22 @@ from ..core.exception import TranslationError as ServiceTranslationError # Alias
 
 logger = logging.getLogger(__name__)
 
+ISO_TO_BCP47_MAP = {
+    "en": "en-US",
+    "ms": "ms-MY",
+    "id": "id-ID",
+    "fil": "fil-PH",
+    "th": "th-TH",
+    "vi": "vi-VN",
+    "km": "km-KH",
+    "my": "my-MM",
+    "zh-cn": "cmn-Hans-CN", # Translate often detects zh-CN or zh-TW
+    "zh-tw": "cmn-Hant-TW", # Use Hant for traditional
+    "zh": "cmn-Hans-CN",    # Default Chinese to simplified
+    "ta": "ta-IN",
+    # Add others...
+}
+
 class TranslationService:
     """Handles text translation logic."""
 
@@ -94,3 +110,38 @@ class TranslationService:
             # Fallback: return the untranslated NLU response
             logger.warning("Translation failed. Returning original NLU response text.")
             return text
+
+    async def detect_language_of_text(self, text: str) -> Optional[str]:
+        """
+        Detects the language of a text string and returns its likely BCP-47 code.
+        Returns None if detection fails or is undetermined.
+        """
+        if not text:
+            return None
+        try:
+            detection_result = await self.client.detect_language(text)
+            # Result is a dict: {'language': 'fi', 'confidence': 0.65, 'input': '...'}
+            detected_iso = detection_result.get('language')
+            confidence = detection_result.get('confidence', 0.0)
+
+            if detected_iso and detected_iso != 'und' and confidence > 0.5:  # Add confidence threshold
+                # Map ISO code back to a BCP-47 code (using our helper map)
+                bcp47_code = ISO_TO_BCP47_MAP.get(detected_iso, None)
+                if not bcp47_code:
+                    # Fallback if specific BCP-47 isn't mapped: just use the ISO code?
+                    # Or maybe construct a basic one? Let's return None for now if unmapped.
+                    logger.warning(
+                        f"Detected language ISO code '{detected_iso}' has no defined BCP-47 mapping in ISO_TO_BCP47_MAP. Cannot determine BCP-47.")
+                    return None
+                    # Alternative: return f"{detected_iso}-{detected_iso.upper()}" # e.g., fi-FI (guessing region)
+
+                logger.info(
+                    f"Detected language of fallback transcript as: {detected_iso} -> {bcp47_code} (Confidence: {confidence:.2f})")
+                return bcp47_code
+            else:
+                logger.warning(
+                    f"Language detection for fallback transcript returned undetermined or low confidence. ISO: {detected_iso}, Conf: {confidence:.2f}")
+                return None
+        except (TranslationError, Exception) as e:
+            logger.error(f"Language detection failed: {e}", exc_info=True)
+            return None  # Return None on error

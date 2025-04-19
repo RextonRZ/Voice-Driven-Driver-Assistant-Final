@@ -1,13 +1,10 @@
 # backend/services/navigation_service.py
+import asyncio
+import functools
 import os
 import logging
-import requests
 from typing import Optional, Tuple, List, Any, Dict
-from bs4 import BeautifulSoup # Import BeautifulSoup
-import httpx # Keep for type hint in __init__
-import requests # **** ADD requests IMPORT ****
-import asyncio # **** ADD asyncio IMPORT ****
-import functools # **** ADD functools IMPORT ****
+import requests
 
 # Use the refactored client
 from ..core.clients.google_maps import GoogleMapsClient, COMPLEX_PLACE_TYPES
@@ -23,9 +20,8 @@ FLOOD_ALERT_LEVELS = {"alert", "warning", "danger"}
 class NavigationService:
     """Handles navigation-related tasks like routing, ETA, and checks using Routes API."""
 
-    def __init__(self, maps_client: GoogleMapsClient, http_client: httpx.AsyncClient, settings: Settings):
+    def __init__(self, maps_client: GoogleMapsClient, settings: Settings):
         self.maps_client = maps_client
-        self.http_client = http_client # Store the http client
         self.settings = settings
         logger.debug("NavigationService initialized (using Routes API via client and httpx).")
 
@@ -222,14 +218,6 @@ class NavigationService:
         else:
             logger.info(f"No flood alerts (Alert/Warning/Danger) found for state: {state_name} ({state_code}) based on latest check.")
 
-        # Include placeholder warnings if any (can be removed if only using scraped data)
-        # ... (existing placeholder logic based on destination address can be kept or removed) ...
-        # if "bedok" in destination_address.lower() or "geylang" in destination_address.lower():
-        #     if not any("bedok" in w.message.lower() or "geylang" in w.message.lower() for w in warnings):
-        #          warnings.append(RouteWarning(type="FLOOD_PLACEHOLDER", message=f"Placeholder: Potential flood risk noted in {destination_address}.", location=location))
-
-
-        return warnings
     async def is_pickup_location_complex(self, order_context: OrderContext) -> bool:
         """
         Checks if the pickup location is likely complex (mall, airport, etc.)
@@ -328,7 +316,6 @@ class NavigationService:
         logger.info(f"Fetching river level data from {target_url} for state {state_code} using 'requests' library...")
 
         try:
-            # --- Use synchronous requests in an executor ---
             loop = asyncio.get_running_loop()
             requests_get_with_args = functools.partial(
                 requests.get,
@@ -345,46 +332,11 @@ class NavigationService:
                 requests_get_with_args, # The partial function
                 target_url # The positional URL argument
             )
-            # --------------------------------------------
 
             response.raise_for_status() # Raise HTTP errors
             html_content = response.text
             logger.debug(f"Successfully fetched HTML content ({len(html_content)} bytes) via 'requests'.")
 
-            # --- Parsing logic remains the same ---
-            soup = BeautifulSoup(html_content, 'lxml')
-            table = soup.find('table')
-            if not table:
-                logger.warning(f"Could not find the data table on the flood page for state {state_code}.")
-                return []
-            tbody = table.find('tbody')
-            if not tbody:
-                 logger.warning(f"Could not find the tbody within the data table for state {state_code}.")
-                 return []
-            # ... (rest of parsing logic as before) ...
-            header_map = { # Map column index to a meaningful key
-                2: "station_name", 3: "district", 6: "last_updated", 7: "water_level_m",
-                8: "status_normal", 9: "status_alert", 10: "status_warning", 11: "status_danger",
-            }
-            status_keys = { 8: "Normal", 9: "Alert", 10: "Warning", 11: "Danger" }
-            rows = tbody.find_all('tr')
-            logger.debug(f"Found {len(rows)} rows in the table body.")
-            for row in rows:
-                cells = row.find_all('td')
-                if len(cells) < 12: continue
-                station_info = {}
-                current_status = "Unknown"
-                for idx, cell in enumerate(cells):
-                    key = header_map.get(idx)
-                    if key: station_info[key] = cell.text.strip()
-                    if idx in status_keys:
-                        cell_text = cell.text.strip()
-                        if cell_text: current_status = status_keys[idx]
-                station_info['status'] = current_status
-                if station_info.get("station_name"):
-                    stations_data.append(station_info)
-                    if current_status.lower() in FLOOD_ALERT_LEVELS:
-                        logger.debug(f"Parsed station data with alert: {station_info}")
             logger.info(f"Parsed {len(stations_data)} stations for state {state_code}.")
             return stations_data
             # --- End Parsing Logic ---

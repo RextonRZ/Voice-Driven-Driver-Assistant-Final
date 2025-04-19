@@ -14,6 +14,7 @@ from ..core.clients.google_tts import GoogleTtsClient
 from ..core.clients.gemini import GeminiClient
 from ..core.clients.google_translate import GoogleTranslateClient
 from ..core.clients.google_maps import GoogleMapsClient
+from ..core.clients.openai_client import OpenAiClient
 
 # --- Services ---
 from ..services.transcription_service import TranscriptionService
@@ -27,7 +28,7 @@ from ..core.exception import ConfigurationError  # Import exception
 
 logger = logging.getLogger(__name__)
 
-from fastapi import Depends, Request  # Import Request if needed later for app.state
+from fastapi import Depends
 
 
 # --- Settings ---
@@ -62,26 +63,20 @@ try:
     _twilio_client_instance = TwilioClient(settings=_settings_instance)
     logger.info("Global TwilioClient initialized (or disabled).")
 
-    # --- Initialize HTTPX Client with Custom SSL Context ---
-    _http_client_instance = None
+    _openai_client_instance = None
     try:
-        # WARNING: Disabling SSL verification is insecure. For testing/hackathon only.
-        _http_client_instance = httpx.AsyncClient(
-            timeout=15.0,
-            verify=False  # <<< DISABLE VERIFICATION HERE
-        )
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        logger.warning("!!! Initialized httpx client with SSL VERIFICATION DISABLED !!!")
-        logger.warning("!!! This is insecure and only for temporary hackathon use.  !!!")
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
-    except Exception as http_init_exc:
-        logger.critical(f"Failed to initialize httpx client: {http_init_exc}", exc_info=True)
-        _http_client_instance = None  # Ensure it's None on failure
-    # --- End HTTPX Client Init ---
-
-    logger.info("All global client instances initialized successfully.")
-
+        # Initialization logic is inside the OpenAiClient class now
+        _openai_client_instance = OpenAiClient(settings=_settings_instance)
+        if _openai_client_instance.enabled:
+            logger.info("Global OpenAiClient initialized.")
+        else:
+            logger.warning("Global OpenAiClient initialized but is DISABLED (check API key).")
+    except ConfigurationError as e:
+        logger.error(f"Failed to initialize OpenAI client during startup: {e}")
+        _openai_client_instance = None  # Ensure it's None on failure
+    except Exception as e:
+        logger.error(f"Unexpected error initializing OpenAI client: {e}", exc_info=True)
+        _openai_client_instance = None
 
     logger.info("All global client instances initialized successfully.")
 
@@ -95,8 +90,7 @@ except ConfigurationError as e:
     _translate_client_instance = None
     _maps_client_instance = None
     _twilio_client_instance = None
-    _http_client_instance = None # Ensure http client is also None
-    # You might want to raise the exception again if clients are absolutely essential
+    _openai_client_instance = None
     # raise e
 except Exception as e:
     logger.critical(f"FATAL: Unexpected error initializing global client instances in dependencies.py: {e}", exc_info=True)
@@ -106,7 +100,7 @@ except Exception as e:
     _translate_client_instance = None
     _maps_client_instance = None
     _twilio_client_instance = None
-    _http_client_instance = None # Ensure http client is also None
+    _openai_client_instance = None
     # raise ConfigurationError(f"Unexpected error during global client setup: {e}", original_exception=e)
 
 
@@ -153,26 +147,19 @@ def get_twilio_client() -> TwilioClient:
     logger.debug("Providing global TwilioClient instance.")
     return _twilio_client_instance
 
-# --- Add HTTPX Client Getter ---
-def get_http_client() -> httpx.AsyncClient:
-    """Provides the globally initialized httpx.AsyncClient instance."""
-    if _http_client_instance is None:
-        # This will now also catch the case where custom context creation failed
-        raise ConfigurationError("HTTPX Client was not initialized successfully.")
-    logger.debug("Providing global httpx.AsyncClient instance.")
-    return _http_client_instance
-
+def get_openai_client() -> OpenAiClient:
+    """Provides the globally initialized OpenAiClient instance."""
+    if _openai_client_instance is None:
+        raise ConfigurationError("OpenAI Client was not initialized successfully.")
+    # Check if enabled *at time of request* as well? Or rely on init check?
+    # Rely on init check for now, client methods raise error if not enabled.
+    # if not _openai_client_instance.enabled:
+    #     raise ConfigurationError("OpenAI Client is configured but disabled (e.g., missing API key).")
+    logger.debug("Providing global OpenAiClient instance.")
+    return _openai_client_instance
 
 # --- Service Getters (Depend on global client getters and settings) ---
 # No changes needed below this line compared to the previous correct version
-
-def get_transcription_service(
-    stt_client: GoogleSttClient = Depends(get_google_stt_client),
-    settings: Settings = Depends(get_settings)
-) -> TranscriptionService:
-    logger.debug("Providing TranscriptionService instance.")
-    return TranscriptionService(stt_client=stt_client, settings=settings)
-
 def get_translation_service(
     translate_client: GoogleTranslateClient = Depends(get_google_translate_client),
     settings: Settings = Depends(get_settings)
@@ -196,13 +183,11 @@ def get_synthesis_service(
 
 def get_navigation_service(
     maps_client: GoogleMapsClient = Depends(get_google_maps_client),
-    http_client: httpx.AsyncClient = Depends(get_http_client), # Correctly depends on http_client
     settings: Settings = Depends(get_settings)
 ) -> NavigationService:
     logger.debug("Providing NavigationService instance.")
     return NavigationService(
         maps_client=maps_client,
-        http_client=http_client, # Correctly passes http_client
         settings=settings
     )
 
@@ -212,6 +197,20 @@ def get_safety_service(
 ) -> SafetyService:
     logger.debug("Providing SafetyService instance.")
     return SafetyService(settings=settings, twilio_client=twilio_client)
+
+def get_transcription_service(
+    stt_client: GoogleSttClient = Depends(get_google_stt_client),
+    openai_client: OpenAiClient = Depends(get_openai_client),
+    translation_service: TranslationService = Depends(get_translation_service), # **** ADD DEPENDENCY ****
+    settings: Settings = Depends(get_settings)
+) -> TranscriptionService:
+    logger.debug("Providing TranscriptionService instance with Google STT, OpenAI, and Translation clients.")
+    return TranscriptionService(
+        stt_client=stt_client,
+        openai_client=openai_client,
+        translation_service=translation_service, # **** PASS SERVICE ****
+        settings=settings
+    )
 
 def get_conversation_service(
     transcription_service: TranscriptionService = Depends(get_transcription_service),

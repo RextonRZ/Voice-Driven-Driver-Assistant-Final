@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from google.cloud import translate_v2 as translate # v2 is simpler for basic use
 # from google.cloud import translate # v3beta is more complex but offers more features
 from google.api_core.exceptions import GoogleAPIError
@@ -91,3 +91,28 @@ class GoogleTranslateClient:
         except Exception as e:
              logger.error(f"Unexpected error during translation: {e}", exc_info=True)
              raise TranslationError(f"An unexpected error occurred during translation: {e}", original_exception=e)
+
+    async def detect_language(self, text: str | List[str]) -> Dict | List[Dict]:
+        """Detects the language of the given text."""
+        if not text:
+            logger.warning("Detect language called with empty text.")
+            if isinstance(text, list):
+                return [{'language': 'und', 'confidence': 0.0, 'input': t} for t in text]  # 'und' = undetermined
+            else:
+                return {'language': 'und', 'confidence': 0.0, 'input': text}
+
+        try:
+            loop = asyncio.get_running_loop()
+            logger.debug("Requesting language detection from Google Translate API.")
+            # Use the detect_language method of the v2 client
+            detect_func = functools.partial(self.client.detect_language)
+            result = await loop.run_in_executor(None, detect_func, text)
+            logger.info(
+                f"Language detection successful. Detected: '{result.get('language') if isinstance(result, dict) else [r.get('language') for r in result]}'")
+            return result  # Returns dict or list of dicts with 'language', 'confidence', 'input'
+        except GoogleAPIError as e:
+            logger.error(f"Google Translate API error during language detection: {e}", exc_info=True)
+            raise TranslationError(f"Language detection API request failed: {e}", original_exception=e)
+        except Exception as e:
+            logger.error(f"Unexpected error during language detection: {e}", exc_info=True)
+            raise TranslationError(f"An unexpected error occurred during language detection: {e}", original_exception=e)
