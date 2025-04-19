@@ -1,6 +1,7 @@
 # backend/services/nlu_service.py
 import logging
 import json
+import time  # Add this import
 from typing import List, Dict, Any, Optional
 
 from ..core.clients.gemini import GeminiClient
@@ -114,6 +115,7 @@ class NluService:
             NluError: If the underlying Gemini API call fails critically.
         """
         logger.info("Getting structured NLU result from Gemini.")
+        start_time = time.time()  # Start timing
 
         if not user_query:
             logger.warning("NLU service received empty user query.")
@@ -153,3 +155,6 @@ class NluService:
         except Exception as e:
             logger.error(f"Unexpected error in NLU service during Gemini interaction: {e}", exc_info=True)
             raise NluError(f"An unexpected error occurred during NLU processing: {e}", original_exception=e)
+        finally:
+            end_time = time.time()  # End timing
+            logger.info(f"NLU processing time: {end_time - start_time:.2f} seconds")

@@ -12,7 +12,7 @@ try:
     from pydub.exceptions import CouldntDecodeError
 
     # Define the directory containing ffmpeg binaries
-    ffmpeg_bin_dir = r'C:\Users\hongy\Downloads\ffmpeg-n6.1-latest-win64-gpl-6.1\bin' # Or C:\ffmpeg\bin
+    ffmpeg_bin_dir = r'C:\Users\ooiru\Downloads\ffmpeg-2025-03-31-git-35c091f4b7-full_build\ffmpeg-2025-03-31-git-35c091f4b7-full_build\bin' # Or C:\ffmpeg\bin
     # Construct the full path to the ffmpeg.exe file
     ffmpeg_executable = os.path.join(ffmpeg_bin_dir, 'ffmpeg.exe')
     ffprobe_executable = os.path.join(ffmpeg_bin_dir, 'ffprobe.exe')

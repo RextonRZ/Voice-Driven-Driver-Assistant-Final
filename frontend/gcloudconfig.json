@@ -1,0 +1,14 @@
+{
+    "type": "service_account",
+    "project_id": "voice-driven-driver-assistant",
+    "private_key_id": "79cd6576fcb2870168c3b84b25e75741c9f245f3",
+    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDtiCasDXMMm5Tg\nEDZxpue6msmo95S7Kmasg3eQNsBJx8FgF4obPRVJRE406RsQ9yQYYOevCa89IvIy\nOwwwjMYzs6bPwy2CVmy74YvSd4gmuLOgWC7EGIfB8EAoSh4fKhaXQDgjUWsBI5fF\nsyJcDQNVUOARQr/dOBpropOooyMcOD0IUTD8tViLtmLENUPiIA4y8O0/O+h2Ym3W\nOoY6dAqEuPN/upLjuMA40NTqTcc7Wke5Vb8gPT0ffcXJuWGWG7YOFwhkEa64xdy0\n9VdUMyG3UbQNVcr+Msg5A3lKA2V4RhyUhSXdligVeXHDnlo5IJCc5PBx7b4zl6BY\nuHWDHMhVAgMBAAECggEAKXlTX0k95F6qAPFzwCZnYbKzMViBVKjTop2V281jh75k\nKlYR3C2vMMrHaP+mpTCx0bvh2DM1sNQQO+sJdtStqstcffxTTuWuOKPqGQab9D7d\nxkp/Z+fslFVRrnc6iTB9H02sP6Zwq5M+ZdugTThMc7IaXYktHQA1xMNvSsupTrzA\n9fl8frdeZhOZ9OS0GdEUxELwW2uuundmScpGDJK2z32hRJSHafkh1LDBErw53H0j\nKL3ksdZNQUnq64XU1lCnca+IlhBzc4GN4rqv5qWra218eiHtOVowEW6d4IWPYOw7\nGwhcTehKnPjmv/PJIJPjzvJoU+xnTpCLjNOiqKe/oQKBgQD39yZQaSO/c0AwZ/iC\nfRmfAmuRzLegCxtAGyYkM1v1a4i/yHTwf9lFRk5KF/++jcNbTfC7y7XN0stQ2c05\nvbjk373eA1WbZi6wTldbUN9k0OwLsMyOE5QD6IQVZ2CpHL/brUUcutxSfXpeDjNK\nYt/zgGiXG/PxiyyMGRic/2m5qQKBgQD1OnSr0b4ur35RIf0nFcIH5DerLBbtKU0F\n7VvXhxDZBpCspyWCNVPXFAJ923h1s7gtAmzVVwMrvv2Tk59HOsQYSxL6sLZ+Tikp\nqkdkQgW54KwKlP5NJvKVnFhMv/MepfEOP23eLQaltlfmKb1GuqUwQQOUgHGBbCE0\neliabSO8zQKBgQCsgGtPFVWhInRNOIdRf+YLEIv06g30cMWMW1a1aGVY3m5LvRBd\nHxPvdXGRahCoZ8a4BgirHJRlk3eNz3dN7AZscpqLkJZFfViNnnJ3PFOstwr/NweW\n71fRQDhjC3/bJfzyvh+OVRBg8pnmRMq5vP8/Tt10AiY6qy9aZzsQPT83wQKBgFvM\nXyJ2qJ/nV/zdIVwBPBoiJ2ivX4G2JTwjx26eBAOJ/pxzEYp1lgX8WpZskuJUvYwz\nzTPrl6dHnrsg1s4eRIvnhppLjnUnoycStBjm0ifr39syPSP6gXLaDP/mFweRDPTN\nb75s0oE0CiGB3HXeprmyjLmJf3P4W1G+vu5IDsm9AoGBANpAl1qC66guDZOmM19m\nJF34qUsW5dz2KfFM92NfphpjQO8nPfzCLJCWoQi8EAjTxokgW24KsgTjRcJNXLw0\nZTuvWUy4h1kWTMvXbpg3wx3x2AQXE5ZncXgOOf0CVFAuh6GbmI1jbqN1I1phMpnz\n99HkTO+BIIbHzIKXMChSAmRt\n-----END PRIVATE KEY-----\n",
+    "client_email": "voice-driven-assistant-stt-tts@voice-driven-driver-assistant.iam.gserviceaccount.com",
+    "client_id": "105598916752699260890",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/voice-driven-assistant-stt-tts%40voice-driven-driver-assistant.iam.gserviceaccount.com",
+    "universe_domain": "googleapis.com"
+  }
+  
