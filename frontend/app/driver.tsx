@@ -675,8 +675,10 @@ export default function Driver() {
                 >
                     <View
                         style={{
+                            position: 'absolute',
                             backgroundColor: 'white',
                             borderRadius: 12,
+                            bottom: '30%',
                             shadowColor: '#000',
                             shadowOffset: { width: 0, height: 2 },
                             shadowOpacity: 0.25,
