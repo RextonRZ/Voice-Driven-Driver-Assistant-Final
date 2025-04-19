@@ -64,6 +64,8 @@ export class MapsService {
       const response = await axios.get(`${API_URL}/maps/directions`, {
         params: { origin, destination },
       });
+      const responseData = await response.data;
+      console.log('Directions response:', response.data);
       return response.data;
     } catch (error) {
       console.error('Error fetching directions:', error);
@@ -114,21 +116,4 @@ export class MapsService {
 
     return distance * 1000; // Convert to meters
   };
-
-  /**
-   * Test API connectivity to verify backend connection
-   */
-  static async testApiConnection(): Promise<boolean> {
-    try {
-      console.log(`Testing API connection to: ${API_URL}/health-check`);
-      const response = await axios.get(`${API_URL}/health-check`, { 
-        timeout: 5000 // 5 second timeout
-      });
-      console.log('API connection successful:', response.data);
-      return true;
-    } catch (error) {
-      console.error('API connection failed:', error);
-      return false;
-    }
-  }
 }
