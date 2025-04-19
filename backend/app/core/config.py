@@ -83,13 +83,20 @@ Output ONLY a JSON object with the following structure:
     STT_MODEL: Optional[str] = "latest_long"
     STT_ENABLE_AUTOMATIC_PUNCTUATION: bool = True
 
+    # --- Noise Reduction Settings (NEW) ---
+    NOISE_REDUCTION_METHOD: str = "tunable_nr"  # Options: 'tunable_nr', 'wiener' (if implemented), 'none'
+    # Parameters for 'tunable_nr' method (from noise_reduction.py defaults/example)
+    NR_PROP_DECREASE: float = 0.9  # NR strength (0.0-1.0). Controls how much noise is subtracted.
+    NR_TIME_SMOOTH_MS: float = 150.0  # Temporal smoothing (ms). Higher = less aggressive gating.
+    NR_PASSES: int = 1
+
     # --- TTS Settings ---
     DEFAULT_TTS_SPEAKING_RATE: float = 1.0
     TTS_AUDIO_ENCODING: str = "MP3" # Or LINEAR16 if preferred
     DEFAULT_TTS_VOICE_NAME: Optional[str] = "en-US-Standard-C" # Fallback voice
     TTS_LANGUAGE_VOICE_MAP: Dict[str, str] = {  # BCP-47 lowercased : Voice Name
         "en-us": "en-US-Standard-C",
-        "en-sg": "en-US-Standard-B",  # <<< MAKE SURE THIS IS CORRECT and SAVED
+        "en-sg": "en-US-Standard-B",
         "en-ph": "en-PH-Standard-A",
         "ms-my": "ms-MY-Standard-A",
         "id-id": "id-ID-Standard-A",

@@ -1,7 +1,7 @@
 import logging
 from typing import Tuple, Optional
 from google.cloud import speech
-from google.api_core.exceptions import GoogleAPIError
+from google.api_core.exceptions import GoogleAPIError, InvalidArgument
 import asyncio
 
 from ..config import Settings, settings as global_settings

@@ -27,7 +27,7 @@ from ..core.exception import ConfigurationError  # Import exception
 
 logger = logging.getLogger(__name__)
 
-from fastapi import Depends, Request  # Import Request if needed later for app.state
+from fastapi import Depends
 
 
 # --- Settings ---
@@ -61,24 +61,6 @@ try:
 
     _twilio_client_instance = TwilioClient(settings=_settings_instance)
     logger.info("Global TwilioClient initialized (or disabled).")
-
-    # --- Initialize HTTPX Client with Custom SSL Context ---
-    _http_client_instance = None
-    try:
-        # WARNING: Disabling SSL verification is insecure. For testing/hackathon only.
-        _http_client_instance = httpx.AsyncClient(
-            timeout=15.0,
-            verify=False  # <<< DISABLE VERIFICATION HERE
-        )
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        logger.warning("!!! Initialized httpx client with SSL VERIFICATION DISABLED !!!")
-        logger.warning("!!! This is insecure and only for temporary hackathon use.  !!!")
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
-    except Exception as http_init_exc:
-        logger.critical(f"Failed to initialize httpx client: {http_init_exc}", exc_info=True)
-        _http_client_instance = None  # Ensure it's None on failure
-    # --- End HTTPX Client Init ---
 
     logger.info("All global client instances initialized successfully.")
 
@@ -153,16 +135,6 @@ def get_twilio_client() -> TwilioClient:
     logger.debug("Providing global TwilioClient instance.")
     return _twilio_client_instance
 
-# --- Add HTTPX Client Getter ---
-def get_http_client() -> httpx.AsyncClient:
-    """Provides the globally initialized httpx.AsyncClient instance."""
-    if _http_client_instance is None:
-        # This will now also catch the case where custom context creation failed
-        raise ConfigurationError("HTTPX Client was not initialized successfully.")
-    logger.debug("Providing global httpx.AsyncClient instance.")
-    return _http_client_instance
-
-
 # --- Service Getters (Depend on global client getters and settings) ---
 # No changes needed below this line compared to the previous correct version
 
@@ -196,13 +168,11 @@ def get_synthesis_service(
 
 def get_navigation_service(
     maps_client: GoogleMapsClient = Depends(get_google_maps_client),
-    http_client: httpx.AsyncClient = Depends(get_http_client), # Correctly depends on http_client
     settings: Settings = Depends(get_settings)
 ) -> NavigationService:
     logger.debug("Providing NavigationService instance.")
     return NavigationService(
         maps_client=maps_client,
-        http_client=http_client, # Correctly passes http_client
         settings=settings
     )
 

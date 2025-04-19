@@ -10,38 +10,40 @@ import numpy as np
 try:
     from pydub import AudioSegment
     from pydub.exceptions import CouldntDecodeError
+    PYDUB_AVAILABLE = True
 
-    # Define the directory containing ffmpeg binaries
+    # --- FFmpeg path configuration (KEEP AS BEFORE) ---
     ffmpeg_bin_dir = r'C:\Users\hongy\Downloads\ffmpeg-n6.1-latest-win64-gpl-6.1\bin' # Or C:\ffmpeg\bin
-    # Construct the full path to the ffmpeg.exe file
     ffmpeg_executable = os.path.join(ffmpeg_bin_dir, 'ffmpeg.exe')
     ffprobe_executable = os.path.join(ffmpeg_bin_dir, 'ffprobe.exe')
-
-    # Set converter path
     if os.path.exists(ffmpeg_executable):
         AudioSegment.converter = ffmpeg_executable
         logging.info(f"Explicitly setting pydub converter path to: {AudioSegment.converter}")
     else:
         logging.error(f"FFmpeg executable not found at: {ffmpeg_executable}. pydub will likely fail.")
-        # raise FileNotFoundError(f"Required FFmpeg executable not found at: {ffmpeg_executable}")
-
-    # Set ffprobe path
     if os.path.exists(ffprobe_executable):
          AudioSegment.ffprobe = ffprobe_executable
          logging.info(f"Explicitly setting pydub ffprobe path to: {AudioSegment.ffprobe}")
     else:
-         logging.error(f"ffprobe executable not found at: {ffprobe_executable}. pydub needs ffprobe to get media info.")
-         # raise FileNotFoundError(f"Required ffprobe executable not found at: {ffprobe_executable}")
+         logging.error(f"ffprobe executable not found at: {ffprobe_executable}. pydub needs ffprobe.")
+    # --- End FFmpeg path configuration ---
 
 except ImportError:
     AudioSegment = None
     CouldntDecodeError = None
-    logging.error("pydub library not found. Please install it (`pip install pydub`).")
+    PYDUB_AVAILABLE = False
+    logging.error("pydub library not found. Please install it (`pip install pydub`). Audio loading/conversion will fail.")
 except Exception as e:
     AudioSegment = None
     CouldntDecodeError = None
+    PYDUB_AVAILABLE = False
     logging.error(f"Error occurred during pydub/ffmpeg path configuration: {e}", exc_info=True)
-# -------------------------------------
+
+from ..core.audio_enhancement import (
+    apply_tunable_noise_reduction,
+    NOISEREDUCE_AVAILABLE, # Check availability from the new module
+    LIBROSA_AVAILABLE      # Also check if librosa is available, as it's needed by VAD
+)
 
 try:
     import noisereduce as nr
@@ -64,10 +66,24 @@ class TranscriptionService:
     def __init__(self, stt_client: GoogleSttClient, settings: Settings):
         self.stt_client = stt_client
         self.settings = settings
-        if AudioSegment is None:
-            raise ImportError("TranscriptionService requires pydub.")
+        if not PYDUB_AVAILABLE:
+            # Log error or raise if pydub is absolutely essential
+            logger.critical("pydub library is not available or failed to configure. TranscriptionService may not function.")
+            # raise ImportError("TranscriptionService requires pydub and ffmpeg.")
 
-        self.noise_reduction_enabled = nr is not None
+        # Update noise reduction check based on the new module's flags
+        self.noise_reduction_enabled = (
+            NOISEREDUCE_AVAILABLE and
+            LIBROSA_AVAILABLE and # VAD dependency
+            self.settings.NOISE_REDUCTION_METHOD == 'tunable_nr' # Check setting
+        )
+        if self.settings.NOISE_REDUCTION_METHOD != 'none' and not self.noise_reduction_enabled:
+             logger.warning(f"Noise reduction method '{self.settings.NOISE_REDUCTION_METHOD}' requested in settings, but prerequisites (noisereduce/librosa) are missing or method is unsupported. Disabling NR.")
+        elif self.noise_reduction_enabled:
+             logger.info(f"Noise reduction enabled using method: {self.settings.NOISE_REDUCTION_METHOD}")
+        else:
+            logger.info("Noise reduction is disabled (either by setting or missing dependencies).")
+
         logger.debug("TranscriptionService initialized.")
 
     def _decode_audio(self, audio_data: bytes | str) -> bytes:
@@ -88,38 +104,16 @@ class TranscriptionService:
             logger.error(f"Unexpected audio data type received: {type(audio_data)}")
             raise InvalidRequestError("Audio data must be bytes or a base64 encoded string.")
 
-    def _apply_noise_reduction(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
-        if not self.noise_reduction_enabled:
-            logger.debug("Skipping noise reduction as library is not available.")
-            return audio_data
-
-        logger.info(f"Applying noise reduction (spectral gating)... Sample rate: {sample_rate} Hz")
-        try:
-            # Parameters can be tuned:
-            # prop_decrease: How much to reduce noise (0.0 to 1.0). Default 1.0
-            # n_fft: Size of FFT window. Default 2048
-            # hop_length: Hop length for FFT. Default 512
-            # For non-stationary noise, tweaking might be needed, or using a different algo.
-            reduced_noise_audio = nr.reduce_noise(
-                y=audio_data,  # Use 'y' instead of 'audio_clip' for newer versions
-                sr=sample_rate,
-                stationary=False,  # Experiment with stationary=False for non-stationary noise
-                prop_decrease=0.8,  # Try reducing less aggressively initially
-                n_fft=2048,
-                hop_length=512
-            )
-            logger.info("Noise reduction applied successfully.")
-            return reduced_noise_audio
-        except Exception as e:
-            # Catch potential errors during noise reduction process
-            logger.error(f"Error during noise reduction: {e}", exc_info=True)
-            # Fallback: return original audio if reduction fails
-            return audio_data
 
     def _process_and_convert_audio(self, raw_audio_bytes: bytes) -> Tuple[bytes, int]:
+        # --- MODIFIED METHOD ---
         if not raw_audio_bytes:
             logger.warning("Cannot process empty audio data.")
             raise InvalidRequestError("Cannot process empty audio data.")
+        if not PYDUB_AVAILABLE or AudioSegment is None:
+             logger.error("Cannot process audio: pydub is not available.")
+             raise InvalidRequestError("Audio processing library (pydub) is not configured correctly.")
+
 
         try:
             logger.info("Loading audio using pydub...")
@@ -127,81 +121,77 @@ class TranscriptionService:
             logger.info(
                 f"pydub loaded audio. Original - Channels: {audio.channels}, Rate: {audio.frame_rate} Hz, Sample Width: {audio.sample_width}, Duration: {len(audio) / 1000.0:.2f}s")
 
-            # Ensure audio is suitable for STT (Mono, potentially resample if needed - keeping original rate for now)
             if audio.channels > 1:
                 logger.debug("Converting to mono...")
                 audio = audio.set_channels(1)
 
             sample_rate = audio.frame_rate
 
-            # --- Convert pydub audio to NumPy array for noise reduction ---
-            # Ensure correct dtype based on sample_width (bytes per sample)
-            # 1 byte = 8 bit (int8), 2 bytes = 16 bit (int16), 4 bytes = 32 bit (int32/float32)
-            dtype_map = {1: np.int8, 2: np.int16, 4: np.int32}  # Simple map
-            expected_dtype = dtype_map.get(audio.sample_width, np.int16)  # Default to int16 if unsure
+            dtype_map = {1: np.int8, 2: np.int16, 4: np.int32}
+            expected_dtype = dtype_map.get(audio.sample_width, np.int16)
             logger.debug(f"Extracting audio samples as NumPy array with dtype: {expected_dtype}")
             samples = np.array(audio.get_array_of_samples()).astype(expected_dtype)
 
-            # --- Apply Noise Reduction ---
-            # noisereduce works best with float data between -1 and 1. Convert if necessary.
-            # Check max value to see if normalization is needed
+            # --- Apply Noise Reduction using the new module ---
+            # Convert to float32 for processing
             if np.issubdtype(samples.dtype, np.integer):
                 max_val = np.iinfo(samples.dtype).max
                 samples_float = samples.astype(np.float32) / max_val
-                logger.debug(f"Converted integer samples to float32, max_val used: {max_val}")
+                logger.debug(f"Converted integer samples to float32 for NR, max_val used: {max_val}")
             else:
-                samples_float = samples.astype(np.float32)  # Assume already float if not integer
-                logger.debug("Samples already float, ensuring float32.")
+                samples_float = samples.astype(np.float32)
+                logger.debug("Samples already float, ensuring float32 for NR.")
 
-            reduced_samples_float = self._apply_noise_reduction(samples_float, sample_rate)
+            reduced_samples_float = samples_float # Start with original float samples
 
-            # --- Convert back to original integer type for export ---
-            if np.issubdtype(expected_dtype, np.integer):
-                max_val = np.iinfo(expected_dtype).max
-                # Clamp values to avoid clipping/wrap-around errors after potential NR amplification
-                reduced_samples_int = (np.clip(reduced_samples_float * max_val, -max_val, max_val)).astype(
-                    expected_dtype)
-                logger.debug(f"Converted float samples back to {expected_dtype}.")
+            # Apply NR if enabled and method matches
+            if self.noise_reduction_enabled and self.settings.NOISE_REDUCTION_METHOD == 'tunable_nr':
+                logger.info("Applying tunable noise reduction via audio_enhancement module...")
+                try:
+                    # Call the function from the new module
+                    reduced_samples_float = apply_tunable_noise_reduction(
+                        audio_data=samples_float, # Pass float32 data
+                        sr=sample_rate,
+                        prop_decrease=self.settings.NR_PROP_DECREASE,
+                        time_smooth_ms=self.settings.NR_TIME_SMOOTH_MS,
+                        n_passes=self.settings.NR_PASSES
+                        # Pass other parameters from settings if added later
+                    )
+                    logger.info("Tunable noise reduction applied successfully.")
+                except Exception as e:
+                    logger.error(f"Error during tunable noise reduction call: {e}", exc_info=True)
+                    # Fallback: keep samples_float unchanged (original float samples)
+                    # reduced_samples_float remains samples_float from before the try block
+                    logger.warning("Falling back to audio without noise reduction due to error.")
+            # Add elif for 'wiener' if implemented later
+            # elif self.noise_reduction_enabled and self.settings.NOISE_REDUCTION_METHOD == 'wiener':
+            #    reduced_samples_float = apply_wiener_filter(...)
+
+            # --- Convert back to target format (int16 for LINEAR16) ---
+            # This part remains largely the same as before
+            target_dtype = np.int16
+            if np.issubdtype(target_dtype, np.integer):
+                max_val_out = np.iinfo(target_dtype).max
+                # Clamp values after potential NR amplification
+                final_samples = (np.clip(reduced_samples_float * max_val_out, -max_val_out, max_val_out)).astype(target_dtype)
+                logger.debug(f"Converted float samples back to target {target_dtype}.")
             else:
-                # If original was float, just ensure it's float32
-                reduced_samples_int = reduced_samples_float.astype(np.float32)  # Or original float type if known
-                logger.debug(f"Keeping reduced samples as {reduced_samples_int.dtype}.")
-
-            # --- Convert NumPy array back to bytes (LINEAR16 format) ---
-            # Google STT LINEAR16 expects signed 16-bit PCM.
-            # If our original wasn't 16-bit, we need to ensure the output is.
-            # Best practice: Standardize output to 16-bit PCM after noise reduction.
-            if reduced_samples_int.dtype != np.int16:
-                logger.warning(
-                    f"Original/Reduced dtype ({reduced_samples_int.dtype}) is not int16. Converting to int16 for LINEAR16 export. This might affect quality if original bit depth was higher.")
-                # Re-normalize if converting from different integer types or floats
-                if np.issubdtype(reduced_samples_int.dtype, np.integer):
-                    max_val_in = np.iinfo(reduced_samples_int.dtype).max
-                    normalized_float = reduced_samples_int.astype(np.float32) / max_val_in
-                else:  # Already float
-                    normalized_float = reduced_samples_int
-
-                max_val_out = np.iinfo(np.int16).max
-                final_samples = (np.clip(normalized_float * max_val_out, -max_val_out, max_val_out)).astype(np.int16)
-                logger.debug("Converted final samples to int16.")
-
-            else:
-                final_samples = reduced_samples_int  # Already int16
+                # Should not happen if target is LINEAR16/int16
+                final_samples = reduced_samples_float.astype(np.float32)
+                logger.debug(f"Keeping reduced samples as {final_samples.dtype} (unexpected target).")
 
             processed_audio_bytes = final_samples.tobytes()
-            processed_audio_base64 = base64.b64encode(processed_audio_bytes).decode('utf-8')
             logger.info(
-                f"Audio processing complete (including noise reduction). Final Bytes: {len(processed_audio_bytes)}, Sample Rate: {sample_rate} Hz, Encoding: LINEAR16 (int16)")
+                f"Audio processing complete. Final Bytes: {len(processed_audio_bytes)}, Sample Rate: {sample_rate} Hz, Encoding: LINEAR16 (int16)")
             return processed_audio_bytes, sample_rate
 
         except CouldntDecodeError as e:
             logger.error(f"pydub (ffmpeg) could not decode audio file: {e}", exc_info=True)
             raise InvalidRequestError(
-                f"Failed to decode audio file. Ensure it's a supported format and ffmpeg is installed. Error: {e}")
+                f"Failed to decode audio file. Ensure it's a supported format and ffmpeg is installed/configured. Error: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error during audio processing/noise reduction: {e}", exc_info=True)
+            logger.error(f"Unexpected error during audio processing/conversion: {e}", exc_info=True)
             raise InvalidRequestError(f"An unexpected error occurred while processing the audio file: {e}")
-
 
     async def process_audio(self, audio_data: bytes | str, language_code_hint: Optional[str] = None) -> Tuple[str, str | None]:
         """
