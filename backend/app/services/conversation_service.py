@@ -65,19 +65,19 @@ class ConversationService:
 
     def _update_history(self, session_id: str, user_message: str, assistant_message: str):
         """Adds user and assistant messages to the history, trimming if needed."""
+        # This logic remains the same: stores the ORIGINAL user message and FINAL assistant response
         history = self.chat_histories.get(session_id)
         if not history:
             logger.warning(f"Attempted to update history for non-existent session_id: {session_id}. Creating new history.")
             history = self._get_or_create_history(session_id)
 
-        # Add messages
         history.messages.append(ChatMessage(role="user", content=user_message))
         history.messages.append(ChatMessage(role="assistant", content=assistant_message))
 
-        # Trim history (keep last N pairs)
-        max_len = self.settings.HISTORY_MAX_MESSAGES * 2
-        if len(history.messages) > max_len:
-             excess = len(history.messages) - max_len
+        max_pairs = self.settings.HISTORY_MAX_MESSAGES
+        max_messages = max_pairs * 2
+        if len(history.messages) > max_messages:
+             excess = len(history.messages) - max_messages
              history.messages = history.messages[excess:]
              logger.debug(f"History for session {session_id} trimmed to {len(history.messages)} messages.")
 
@@ -297,153 +297,223 @@ class ConversationService:
 
     async def process_interaction(self, request: ProcessAudioRequest) -> AssistantResponse:
         """
-        Handles the full voice interaction flow: STT -> Translate -> NLU -> Dispatch -> Translate Back -> TTS.
+        Handles the full interaction flow: STT -> Refine -> Translate -> NLU -> Dispatch -> Translate Back -> TTS.
         """
         session_id = request.session_id
+        start_time = datetime.now()
         logger.info(f"Processing interaction for session_id: {session_id}")
 
         # --- 1. Speech-to-Text ---
         user_transcription_original = ""
         detected_language_bcp47 = None
         try:
+            stt_start = datetime.now()
             user_transcription_original, detected_language_bcp47 = await self.transcription_service.process_audio(
                 audio_data=request.audio_data,
                 language_code_hint=request.language_code_hint
             )
-            # Handle empty transcription early
+            stt_duration = (datetime.now() - stt_start).total_seconds()
+            logger.info(f"STT complete ({stt_duration:.2f}s). Detected Lang: {detected_language_bcp47}. Original Text: '{user_transcription_original[:70]}...'")
+
+            # Handle empty transcription right after STT
             if not user_transcription_original:
                  logger.warning(f"Transcription resulted in empty text for session {session_id}.")
+                 # Synthesize a generic "didn't catch that" in detected/default language
                  no_input_text = "Sorry, I didn't catch that. Could you please repeat?"
-                 # Synthesize in detected language (or default)
                  tts_lang_for_error = detected_language_bcp47 or self.settings.DEFAULT_LANGUAGE_CODE
+                 tts_start = datetime.now()
                  no_input_audio = await self.synthesis_service.text_to_speech(
                      text=no_input_text, language_code=tts_lang_for_error, return_base64=True
                  )
+                 tts_duration = (datetime.now() - tts_start).total_seconds()
+                 logger.info(f"Synthesized empty input response ({tts_duration:.2f}s)")
                  return AssistantResponse(
                      session_id=session_id, request_transcription="",
                      response_text=no_input_text, response_audio=no_input_audio,
                      detected_input_language=detected_language_bcp47
                  )
+
         except (TranscriptionError, InvalidRequestError) as e:
-            logger.error(f"STT failed for session {session_id}: {e}")
-            # Raise specific exceptions to be caught by API layer for appropriate HTTP status
-            raise e
+            logger.error(f"STT or preprocessing failed for session {session_id}: {e}")
+            raise e # Raise to API layer for appropriate HTTP status
         except Exception as e:
              logger.error(f"Unexpected error during STT stage for session {session_id}: {e}", exc_info=True)
-             raise TranscriptionError(f"Unexpected STT error: {e}", original_exception=e) # Wrap
+             raise TranscriptionError(f"Unexpected STT error: {e}", original_exception=e)
+
 
         # --- Determine Effective Language ---
         effective_language_bcp47 = detected_language_bcp47 or self.settings.DEFAULT_LANGUAGE_CODE
-        logger.info(f"Input Lang: {detected_language_bcp47}, Effective Lang: {effective_language_bcp47}, Original Text: '{user_transcription_original[:50]}...'")
+        logger.info(f"Effective language for processing: {effective_language_bcp47}")
 
-        # --- 2. Translate User Input (if needed) ---
-        user_input_for_nlu = user_transcription_original
+        # --- 2. Refine Transcription (NEW STEP) ---
+        text_for_translation = user_transcription_original # Default to original if refinement fails/disabled
+        if self.settings.ENABLE_TRANSCRIPTION_REFINEMENT:
+             refine_start = datetime.now()
+             try:
+                 # Call the NLU service's refinement method
+                 refined_transcription = await self.nlu_service.refine_transcription(
+                     original_text=user_transcription_original,
+                     language_bcp47=effective_language_bcp47
+                 )
+                 refine_duration = (datetime.now() - refine_start).total_seconds()
+                 if refined_transcription != user_transcription_original:
+                      logger.info(f"Transcription refined ({refine_duration:.2f}s). Using refined text for translation.")
+                      text_for_translation = refined_transcription
+                      # Log original vs refined for comparison
+                      logger.debug(f"Refinement Diff | Orig: '{user_transcription_original}' | Refined: '{refined_transcription}'")
+                 else:
+                      logger.info(f"Refinement ({refine_duration:.2f}s) did not change the text or failed gracefully. Using original.")
+
+             except Exception as e:
+                 # Catch unexpected errors during refinement call itself
+                 refine_duration = (datetime.now() - refine_start).total_seconds()
+                 logger.error(f"Unexpected error during transcription refinement call ({refine_duration:.2f}s): {e}", exc_info=True)
+                 logger.warning("Proceeding with original transcription due to refinement error.")
+                 # text_for_translation remains user_transcription_original
+
+
+        # --- 3. Translate User Input (Potentially Refined) to NLU Language ---
+        user_input_for_nlu = text_for_translation # Use refined (or original) text
+        translated_source_iso = effective_language_bcp47.split('-')[0] # Default to effective lang
         try:
-            # Translation service handles checking if translation is necessary
-            user_input_for_nlu, source_iso_code_used = await self.translation_service.translate_to_nlu_language(
-                text=user_transcription_original,
+            translate_in_start = datetime.now()
+            # Translation service handles checking if translation is actually needed
+            user_input_for_nlu, detected_iso_after_translate = await self.translation_service.translate_to_nlu_language(
+                text=text_for_translation, # Pass the text chosen in step 2
                 source_bcp47_code=effective_language_bcp47
             )
-            logger.info(f"Text for NLU ({self.nlu_target_language}): '{user_input_for_nlu[:50]}...'")
-        except TranslationError as e: # Catch specific error from service
-            logger.error(f"Input translation failed for session {session_id}: {e}. Using original text.")
-            # Continue with original text, NLU might handle it poorly
-        except Exception as e:
-             logger.error(f"Unexpected error during input translation for session {session_id}: {e}", exc_info=True)
-             # Continue with original text
+            translate_in_duration = (datetime.now() - translate_in_start).total_seconds()
+            logger.info(f"Input translation to '{self.nlu_target_language}' complete ({translate_in_duration:.2f}s). Text for NLU: '{user_input_for_nlu[:70]}...'")
+            # Update the source language based on translation result if available
+            translated_source_iso = detected_iso_after_translate
 
-        # --- 3. NLU Processing (Intent & Entity Recognition) ---
+        except TranslationError as e:
+            translate_in_duration = (datetime.now() - translate_in_start).total_seconds()
+            logger.error(f"Input translation failed ({translate_in_duration:.2f}s) for session {session_id}: {e}. Proceeding with un-translated text.")
+            # user_input_for_nlu remains the (potentially refined) text_for_translation
+        except Exception as e:
+             translate_in_duration = (datetime.now() - translate_in_start).total_seconds()
+             logger.error(f"Unexpected error during input translation ({translate_in_duration:.2f}s) for session {session_id}: {e}", exc_info=True)
+             # Proceed with un-translated text
+
+
+        # --- 4. NLU Processing (Intent & Entity Recognition on Translated Text) ---
         history = self._get_or_create_history(session_id)
         nlu_result: Optional[NluResult] = None
         try:
-            # Prepare context for NLU
+            nlu_start = datetime.now()
             nlu_context = {
                 "current_location": request.current_location,
-                "order_context": request.order_context.dict() if request.order_context else None,
-                "timestamp": datetime.utcnow().isoformat()
+                "order_context": request.order_context.dict(exclude_unset=True) if request.order_context else None, # Use Pydantic's dict method
+                "timestamp": start_time.isoformat(),
+                "original_language": effective_language_bcp47,
             }
             nlu_result = await self.nlu_service.get_nlu_result(
-                user_query=user_input_for_nlu,
+                user_query=user_input_for_nlu, # Use the (potentially translated) text
                 history=history,
                 context=nlu_context
             )
+            nlu_duration = (datetime.now() - nlu_start).total_seconds()
+            logger.info(f"NLU processing complete ({nlu_duration:.2f}s). Intent: {nlu_result.intent.value if nlu_result else 'N/A'}")
+
         except NluError as e:
-            logger.error(f"NLU processing failed for session {session_id}: {e}")
+            nlu_duration = (datetime.now() - nlu_start).total_seconds()
+            logger.error(f"NLU processing failed ({nlu_duration:.2f}s) for session {session_id}: {e}")
             raise e # Let API layer handle
         except Exception as e:
-             logger.error(f"Unexpected error during NLU stage for session {session_id}: {e}", exc_info=True)
-             raise NluError(f"Unexpected NLU error: {e}", original_exception=e) # Wrap
+             nlu_duration = (datetime.now() - nlu_start).total_seconds()
+             logger.error(f"Unexpected error during NLU stage ({nlu_duration:.2f}s) for session {session_id}: {e}", exc_info=True)
+             raise NluError(f"Unexpected NLU error: {e}", original_exception=e)
 
 
-        # --- 4. Handle Intent / Dispatch ---
-        response_text_nlu = "Sorry, something went wrong." # Default if NLU result missing
+        # --- 5. Handle Intent / Dispatch ---
+        response_text_nlu = "Sorry, I wasn't able to understand or process that request." # Default error response in NLU lang
         action_result = None
         if nlu_result:
+            dispatch_start = datetime.now()
             try:
+                # Pass NLU result and original request context
                 response_text_nlu, action_result = await self._handle_intent(
                     nlu_result=nlu_result,
-                    request=request,
+                    request=request, # Contains original context like location, order
                     history=history
                 )
-                logger.info(f"Intent handling completed. Response (NLU Lang): '{response_text_nlu[:50]}...'. Action Result: {type(action_result)}")
+                dispatch_duration = (datetime.now() - dispatch_start).total_seconds()
+                logger.info(f"Intent handling ({nlu_result.intent.value}) complete ({dispatch_duration:.2f}s). Response (NLU Lang): '{response_text_nlu[:70]}...'. Action Result: {type(action_result).__name__}")
             except Exception as e:
                 # Catch errors within the intent handling logic itself
-                logger.exception(f"Core logic error handling intent {nlu_result.intent.value} for session {session_id}: {e}")
-                response_text_nlu = "Sorry, I encountered an internal error trying to process your request."
+                dispatch_duration = (datetime.now() - dispatch_start).total_seconds()
+                logger.exception(f"Core logic error handling intent {nlu_result.intent.value} ({dispatch_duration:.2f}s) for session {session_id}: {e}")
+                response_text_nlu = "Sorry, I encountered an internal error trying to process your request." # Use generic error in NLU lang
                 action_result = None # Clear any partial result
         else:
+             # This case should ideally not happen if NLU service handles errors gracefully
              logger.error(f"NLU result was None for session {session_id}, cannot handle intent.")
-             # Use default error message
+             # Use default error message response_text_nlu
 
 
-        # --- 5. Translate Response Back (if needed) ---
-        final_response_text = response_text_nlu
+        # --- 6. Translate Response Back to User's Language (if needed) ---
+        final_response_text = response_text_nlu # Default to NLU language response
         try:
-            # Translation service handles checking if translation is necessary
+            translate_out_start = datetime.now()
+            # Translation service checks if translation is needed
             final_response_text = await self.translation_service.translate_from_nlu_language(
-                text=response_text_nlu,
-                target_bcp47_code=effective_language_bcp47
+                text=response_text_nlu, # The response generated by _handle_intent
+                target_bcp47_code=effective_language_bcp47 # Target the user's original effective language
             )
-            logger.info(f"Final response text ({effective_language_bcp47}): '{final_response_text[:50]}...'")
+            translate_out_duration = (datetime.now() - translate_out_start).total_seconds()
+            if final_response_text != response_text_nlu:
+                logger.info(f"Output translation to '{effective_language_bcp47}' complete ({translate_out_duration:.2f}s).")
+            else:
+                 logger.info(f"Output translation ({translate_out_duration:.2f}s): No translation needed or translation failed; using NLU language response.")
+            logger.debug(f"Final response text ({effective_language_bcp47}): '{final_response_text[:70]}...'")
         except TranslationError as e:
-            logger.error(f"Output translation failed for session {session_id}: {e}. Sending NLU language response.")
-            # Use the untranslated NLU response text
+            translate_out_duration = (datetime.now() - translate_out_start).total_seconds()
+            logger.error(f"Output translation failed ({translate_out_duration:.2f}s) for session {session_id}: {e}. Sending NLU language response.")
+            # final_response_text remains response_text_nlu
         except Exception as e:
-             logger.error(f"Unexpected error during output translation for session {session_id}: {e}", exc_info=True)
-             # Use the untranslated NLU response text
+             translate_out_duration = (datetime.now() - translate_out_start).total_seconds()
+             logger.error(f"Unexpected error during output translation ({translate_out_duration:.2f}s) for session {session_id}: {e}", exc_info=True)
+             # final_response_text remains response_text_nlu
 
 
-        # --- 6. Text-to-Speech ---
+        # --- 7. Text-to-Speech ---
         assistant_audio_response = ""
         try:
+            tts_start = datetime.now()
             assistant_audio_response = await self.synthesis_service.text_to_speech(
-                text=final_response_text,
-                language_code=effective_language_bcp47,
+                text=final_response_text, # Use the (potentially translated back) final text
+                language_code=effective_language_bcp47, # Use user's effective language for TTS
                 return_base64=True
             )
-            logger.debug(f"Synthesis complete for session {session_id}. Audio length (base64): {len(assistant_audio_response)}")
+            tts_duration = (datetime.now() - tts_start).total_seconds()
+            logger.info(f"Synthesis complete ({tts_duration:.2f}s) for session {session_id}. Audio length (base64 approx): {len(assistant_audio_response)}")
         except SynthesisError as e:
-            logger.error(f"Synthesis failed for session {session_id}: {e}")
+            tts_duration = (datetime.now() - tts_start).total_seconds()
+            logger.error(f"Synthesis failed ({tts_duration:.2f}s) for session {session_id}: {e}")
             raise e # Let API layer handle
         except Exception as e:
-             logger.error(f"Unexpected error during TTS stage for session {session_id}: {e}", exc_info=True)
+             tts_duration = (datetime.now() - tts_start).total_seconds()
+             logger.error(f"Unexpected error during TTS stage ({tts_duration:.2f}s) for session {session_id}: {e}", exc_info=True)
              raise SynthesisError(f"Unexpected TTS error: {e}", original_exception=e) # Wrap
 
-        # --- 7. Update History ---
-        # Store original user input and final (potentially translated) assistant response
+
+        # --- 8. Update History ---
+        # Store the ORIGINAL user input and the FINAL assistant text response
         self._update_history(
             session_id=session_id,
-            user_message=user_transcription_original,
-            assistant_message=final_response_text
+            user_message=user_transcription_original, # Store the raw STT output
+            assistant_message=final_response_text # Store the final text sent to TTS
         )
 
-        # --- 8. Format and Return Response ---
-        logger.info(f"Successfully processed interaction for session_id: {session_id}")
+        # --- 9. Format and Return Response ---
+        total_duration = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Successfully processed interaction for session_id: {session_id}. Total time: {total_duration:.2f}s")
         return AssistantResponse(
             session_id=session_id,
-            request_transcription=user_transcription_original,
+            request_transcription=user_transcription_original, # Return the original transcription
             response_text=final_response_text,
             response_audio=assistant_audio_response,
-            detected_input_language=detected_language_bcp47,
-            action_result=action_result # Include structured result if generated
+            detected_input_language=detected_language_bcp47, # Return language detected by STT
+            action_result=action_result # Include structured result if generated by _handle_intent
         )
