@@ -163,69 +163,73 @@ Our objective is to build a robust voice interaction system addressing these cha
 ## Project Structure
 
 ### Backend Structure
+
+
+```text
 backend/
 ├── app/
-│ ├── api/ # FastAPI routers/endpoints
-│ │ ├── assistant.py
-│ │ ├── dependencies.py # Dependency injection setup
-│ │ ├── navigation.py
-│ │ └── safety.py
-│ ├── core/ # Core logic, clients, config
-│ │ ├── clients/ # Clients for external APIs (Google, OpenAI, Twilio)
-│ │ │ ├── gemini.py
-│ │ │ ├── google_maps.py
-│ │ │ ├── google_stt.py
-│ │ │ ├── google_tts.py
-│ │ │ ├── google_translate.py
-│ │ │ ├── openai_client.py
-│ │ │ └── twilio_client.py (Placeholder)
-│ │ ├── audio_enhancement.py # Noise reduction, VAD logic
-│ │ ├── config.py # Pydantic settings model
-│ │ └── exception.py # Custom exception classes
-│ ├── models/ # Pydantic models
-│ │ ├── internal.py # Internal data structures (NluResult, RouteInfo, etc.)
-│ │ ├── request.py # API request models
-│ │ └── response.py # API response models
-│ ├── services/ # Business logic services
-│ │ ├── conversation_service.py
-│ │ ├── navigation_service.py
-│ │ ├── nlu_service.py
-│ │ ├── safety_service.py
-│ │ ├── synthesis_service.py
-│ │ ├── transcription_service.py
-│ │ └── translation_service.py
-│ ├── ml_models/ # Pre-trained models (e.g., YOLO .pt files)
-│ │ ├── detect_eye_best.pt
-│ │ └── detect_yawn_best.pt
-│ ├── main.py # FastAPI app initialization, middleware, exception handlers
-│ └── init.py
-├── requirements.txt # Python dependencies
-└── .env.example # Example environment variables file
-
+│   ├── api/                  # FastAPI routers/endpoints
+│   │   ├── assistant.py
+│   │   ├── dependencies.py   # Dependency injection setup
+│   │   ├── navigation.py
+│   │   └── safety.py
+│   ├── core/                 # Core logic, clients, config
+│   │   ├── clients/          # Clients for external APIs (Google, OpenAI, Twilio)
+│   │   │   ├── gemini.py
+│   │   │   ├── google_maps.py
+│   │   │   ├── google_stt.py
+│   │   │   ├── google_tts.py
+│   │   │   ├── google_translate.py
+│   │   │   ├── openai_client.py
+│   │   │   └── twilio_client.py (Placeholder)
+│   │   ├── audio_enhancement.py # Noise reduction, VAD logic
+│   │   ├── config.py         # Pydantic settings model
+│   │   └── exception.py      # Custom exception classes
+│   ├── models/               # Pydantic models
+│   │   ├── internal.py       # Internal data structures (NluResult, RouteInfo, etc.)
+│   │   ├── request.py        # API request models
+│   │   └── response.py       # API response models
+│   ├── services/             # Business logic services
+│   │   ├── conversation_service.py
+│   │   ├── navigation_service.py
+│   │   ├── nlu_service.py
+│   │   ├── safety_service.py
+│   │   ├── synthesis_service.py
+│   │   ├── transcription_service.py
+│   │   └── translation_service.py
+│   ├── ml_models/            # Pre-trained models (YOLO, etc.)
+│   │   ├── detect_eye_best.pt
+│   │   └── detect_yawn_best.pt
+│   ├── main.py               # FastAPI app initialization
+│   └── __init__.py
+├── requirements.txt          # Python dependencies
+└── .env.example              # Example environment variables file
+```
 
 ### Frontend Structure
+```
 frontend/
-├── app/ # Expo Router pages
-│ ├── (tabs)/ # Example grouping if tabs were used
-│ │ └── ...
-│ ├── _layout.tsx # Root layout component
-│ ├── driver.tsx # Main driver screen component
-│ └── index.tsx # Splash screen / initial route
-├── assets/ # Static assets (images, fonts)
-│ └── images/
-│ ├── destination-icon.png
-│ ├── origin-icon.png
-│ └── splash.png
-├── components/ # Reusable UI components (if any)
-├── services/ # Service layer for API calls, etc.
-│ └── mapsService.ts
-├── app.json # Expo configuration
-├── babel.config.js # Babel configuration
-├── globals.css # Tailwind CSS global styles
-├── package.json # Node.js dependencies
-├── tailwind.config.js # Tailwind CSS configuration
-└── tsconfig.json # TypeScript configuration
-
+├── app/                     # Expo Router pages
+│   ├── (tabs)/              # Tab layout (optional)
+│   │   └── ...
+│   ├── _layout.tsx          # Root layout component
+│   ├── driver.tsx           # Main driver screen
+│   └── index.tsx            # Splash / initial screen
+├── assets/                  # Static assets
+│   └── images/
+│       ├── destination-icon.png
+│       ├── origin-icon.png
+│       └── splash.png
+├── components/              # Reusable UI components
+├── services/                # API service calls
+│   └── mapsService.ts
+├── app.json                 # Expo configuration
+├── babel.config.js          # Babel config
+├── globals.css              # Tailwind global styles
+├── package.json             # Node.js dependencies
+├── tailwind.config.js       # Tailwind CSS config
+└── tsconfig.json            # TypeScript config
+```
 
 ---
 
