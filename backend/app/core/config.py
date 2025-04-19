@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     # --- API Keys & Credentials ---
     # GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None # Recommended: Set this env var externally for ADC
-    GEMINI_API_KEY: str = "YOUR_GEMINI_API_KEY" # Required for NLU
-    GOOGLE_MAPS_API_KEY: str = "YOUR_GOOGLE_MAPS_API_KEY" # Required for Navigation
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY") # Required for NLU
+    GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY") # Required for Navigation
     # TWILIO_ACCOUNT_SID: Optional[str] = None # Required if using Twilio for SMS/Calls
     # TWILIO_AUTH_TOKEN: Optional[str] = None # Required if using Twilio
     # TWILIO_PHONE_NUMBER: Optional[str] = None # Required if using Twilio
@@ -33,6 +33,30 @@ class Settings(BaseSettings):
     # --- Assistant Behavior ---
     HISTORY_MAX_MESSAGES: int = 10 # Max user/assistant turn pairs in history
     GEMINI_MODEL_NAME: str = "gemini-2.0-flash" # Updated model
+
+    # --- NEW: Refinement Prompt ---
+    ENABLE_TRANSCRIPTION_REFINEMENT: bool = True  # Feature flag for the refinement step
+    NLU_REFINEMENT_PROMPT: str = """
+Task: You are an intelligent assistant aiding a driver who speaks {language_name} ({language_code}). Your task is to refine the provided raw voice transcription. The transcription might contain speech recognition errors, colloquialisms, or be incomplete. Your goal is to interpret the driver's *likely intended request* based on common driving/assistant scenarios and output a clear, complete, and actionable version of that request or statement.
+Instructions:
+1.  **Correct Errors:** Fix obvious speech recognition errors, typos, and misheard words. Pay close attention to locations, names, numbers, and keywords relevant to driving actions (e.g., "navigate", "directions", "send", "message", "call", "check", "flood", "gate", "passenger", "ETA").
+2.  **Infer Intent & Complete Requests:** If the transcription is fragmented or missing key information (like a verb or object), infer the most probable *driver request*.
+    *   Example 1: If input is just "KLCC Tower", infer "Navigate to KLCC Tower" or "Get directions to KLCC Tower".
+    *   Example 2: If input is "message passenger running bit late", infer "Send message to the passenger saying I am running a bit late."
+    *   Example 3: If input is "check flood Bedok area", infer "Check for flood warnings in the Bedok area."
+    *   Example 4: If input is very short like "Gate?" (in a pickup context), infer "Ask passenger for specific gate information".
+    *   Use common sense based on a driver's typical needs during a trip (navigation, communication, status checks).
+3.  **Improve Clarity & Flow:** Rephrase slightly for grammatical correctness and natural sentence structure in {language_name}. Eliminate hesitation sounds or filler words if clearly not part of the intended request.
+4.  **Maintain Core Meaning:** While inferring missing parts, *do not fundamentally change the topic or goal* of the likely request. If the input is truly ambiguous or nonsensical, make minimal corrections. Avoid adding completely new information or requests not implied by the input.
+5.  **Language:** The output MUST be in the original language: {language_code}.
+6.  **Output:** Respond ONLY with the single, refined text string. Do not add greetings, explanations, or labels.
+
+Original Transcription ({language_code}):
+"{original_text}"
+
+Refined Text ({language_code}):
+"""
+
     NLU_INTENT_PROMPT: str = """
 Analyze the user's query considering the conversation history and provided context.
 Identify the primary intent from the list: {intents}.
@@ -81,9 +105,36 @@ Output ONLY a JSON object with the following structure:
 
     # --- Navigation Settings ---
     MAPS_DEFAULT_REGION: str = "MY"  # Bias results towards a region (e.g., SG, MY, PH)
-    MAPS_DEFAULT_TRAVEL_MODE: str = "DRIVING"  # Routes API uses enum name
+    MAPS_DEFAULT_TRAVEL_MODE: str = "DRIVE"  # Routes API uses enum name
     MAPS_ROUTES_FIELD_MASK: str = "routes.legs.steps.localized_values,routes.legs.steps.polyline,routes.warnings,routes.localized_values,routes.route_token,routes.legs.polyline,routes.polyline.encodedPolyline,routes.distanceMeters,routes.duration,routes.travelAdvisory"  # Default fields for RouteInfo
-    FLOOD_CHECK_ENABLED: bool = False
+    FLOOD_CHECK_ENABLED: bool = True
+
+    # --- Flood Check Specific Settings ---
+    FLOOD_DATA_BASE_URL: str = "https://publicinfobanjir.water.gov.my"
+    # Mapping from state names (as likely returned by Google Geocoding for Malaysia)
+    # to the codes used on publicinfobanjir.water.gov.my
+    # NOTE: Verify these codes match the website's dropdown/query params exactly!
+    MALAYSIA_STATE_CODES: Dict[str, str] = {
+        "johor": "JHR",
+        "kedah": "KDH",
+        "kelantan": "KEL",
+        "melaka": "MLK",
+        "negeri sembilan": "NSN",
+        "pahang": "PHG",
+        "perak": "PRK",
+        "perlis": "PLS",
+        "pulau pinang": "PNG",  # Penang
+        "sabah": "SBH",
+        "sarawak": "SWK",
+        "selangor": "SEL",
+        "terengganu": "TRG",
+        "wilayah persekutuan kuala lumpur": "WLY",  # KL Federal Territory
+        "wilayah persekutuan labuan": "WLY",  # Labuan (assuming same code as KL? Verify)
+        "wilayah persekutuan putrajaya": "WLY",  # Putrajaya (assuming same code as KL? Verify)
+        "federal territory of kuala lumpur": "WLY",
+        "kuala lumpur": "WLY",
+        "penang": "PNG",
+    }
 
     # --- Safety Settings ---
     CRASH_DETECTION_NOTIFICATION_ENABLED: bool = True # Feature flag

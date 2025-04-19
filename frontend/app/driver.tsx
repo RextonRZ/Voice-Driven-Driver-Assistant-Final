@@ -49,6 +49,12 @@ export default function Driver() {
     const [userQuery, setUserQuery] = useState<string | null>(null);
     const [dots, setDots] = useState<string>('');
 
+    const [isSmartRecording, setIsSmartRecording] = useState(false);
+    const [silenceDetectionTimer, setSilenceDetectionTimer] = useState<NodeJS.Timeout | null>(null);
+    const [chunkRecording, setChunkRecording] = useState<Audio.Recording | null>(null);
+    const [hasDetectedSpeech, setHasDetectedSpeech] = useState(false);
+    const [silenceCounter, setSilenceCounter] = useState(0);
+
     const mapRef = useRef<MapView>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
     const animatedValue = useRef(new Animated.Value(0)).current;
@@ -514,6 +520,182 @@ export default function Driver() {
         }
     };
 
+    const detectSpeechInAudio = async (audioUri: string): Promise<boolean> => {
+        try {
+            const base64Audio = await FileSystem.readAsStringAsync(audioUri, { 
+                encoding: FileSystem.EncodingType.Base64 
+            });
+            
+            console.log(`Sending audio chunk for speech detection, size: ${base64Audio.length} characters`);
+            
+            const response = await fetch('http://172.20.10.3:8000/assistant/detect-speech', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    audio_data: base64Audio,
+                }),
+            });
+            
+            if (!response.ok) {
+                console.error(`Speech detection API returned status ${response.status}`);
+                return true;
+            }
+            
+            const result = await response.json();
+            console.log(`Speech detection result: ${result.speech_detected}`);
+            return result.speech_detected;
+            
+        } catch (error) {
+            console.error('Error detecting speech:', error);
+            return true;
+        }
+    };
+
+    const checkForSpeech = async () => {
+        try {
+            if (!isRecording || !recording) {
+                console.log('Recording stopped, aborting speech detection');
+                return;
+            }
+            
+            console.log('Creating chunk recording for speech detection...');
+            const { recording: newChunkRecording } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY
+            );
+            setChunkRecording(newChunkRecording);
+            
+            // Record for about 3 seconds before checking
+        const timer = setTimeout(async () => {
+            try {
+                if (!isRecording) {
+                    console.log('Main recording stopped, aborting chunk processing');
+                    if (newChunkRecording) {
+                        await newChunkRecording.stopAndUnloadAsync().catch(e => console.log('Error stopping chunk:', e));
+                    }
+                    return;
+                }
+                
+                // Stop the chunk recording
+                await newChunkRecording.stopAndUnloadAsync();
+                const chunkUri = newChunkRecording.getURI();
+                
+                if (!chunkUri) {
+                    console.error('Failed to get URI for chunk recording');
+                    checkForSpeech(); // Try again
+                    return;
+                }
+                
+                // Read the audio file as base64
+                try {
+                    const base64Audio = await FileSystem.readAsStringAsync(chunkUri, { 
+                        encoding: FileSystem.EncodingType.Base64 
+                    });
+                    
+                    console.log(`Sending audio chunk for speech detection, size: ${base64Audio.length} characters`);
+                    
+                    // Send to backend for speech detection
+                    const response = await fetch('http://172.20.10.3:8000/assistant/detect-speech', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            session_id: sessionId,
+                            audio_data: base64Audio,
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        console.error(`Speech detection API returned status ${response.status}`);
+                        // On error, assume speech detected to avoid premature stopping
+                        setSilenceCounter(0);
+                        checkForSpeech(); // Continue checking
+                        return;
+                    }
+                    
+                    const result = await response.json();
+                    console.log(`Speech detection result: ${result.speech_detected}`);
+                    
+                    if (result.speech_detected) {
+                        console.log('✓ Speech detected, continuing recording...');
+                        setHasDetectedSpeech(true); // Mark that speech has been detected at some point
+                        setSilenceCounter(0); // Reset silence counter when speech is detected
+                        checkForSpeech(); // Continue checking
+                    } else {
+                        console.log('✗ No speech detected in this chunk');
+                        
+                        if (!hasDetectedSpeech) {
+                            console.log('No speech detected yet in entire recording, waiting for speech...');
+                            checkForSpeech(); // Continue checking
+                            return;
+                        }
+                        
+                        // Speech was detected earlier, now increment silence counter
+                        const newSilenceCount = silenceCounter + 1;
+                        console.log(`SILENCE COUNTER: ${newSilenceCount}/2`);
+                        setSilenceCounter(newSilenceCount);
+                        
+                        if (newSilenceCount >= 2) {
+                            console.log('🛑 SILENCE THRESHOLD REACHED: 2 consecutive silent chunks detected');
+                            console.log('Auto-stopping recording...');
+                            
+                            // Update UI immediately to show recording has stopped
+                            setIsRecording(false); 
+                            
+                            // Then call stopRecording to handle the actual stopping and processing
+                            stopRecording();
+                        } else {
+                            console.log(`Silence detected (${newSilenceCount}/2), continuing recording...`);
+                            checkForSpeech(); // Continue checking
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Error processing audio chunk:', error);
+                    // On error, assume speech detected to avoid premature stopping
+                    checkForSpeech();
+                }
+                
+            } catch (error) {
+                console.error('Error in chunk recording processing:', error);
+                if (isRecording) {
+                    checkForSpeech(); // Try again if still recording
+                }
+            }
+        }, 3000); // 3-second chunks
+        
+        setSilenceDetectionTimer(timer);
+        
+    } catch (error) {
+        console.error('Error starting chunk recording:', error);
+        if (isRecording) {
+            checkForSpeech(); // Try again if still recording
+        }
+    }
+};
+
+    const cleanupRecording = () => {
+        if (silenceDetectionTimer) {
+            clearTimeout(silenceDetectionTimer);
+            setSilenceDetectionTimer(null);
+        }
+        
+        if (chunkRecording) {
+            chunkRecording.stopAndUnloadAsync().catch(err => {
+                console.log('Error stopping chunk recording:', err);
+            });
+            setChunkRecording(null);
+        }
+        
+        setIsSmartRecording(false);
+        setIsRecording(false);
+        setHasDetectedSpeech(false);
+        setSilenceCounter(0);
+    };
+
     const getChatBubbleMessage = () => {
         if (listeningStatus === 'listening') {
             return `Listening${dots}`;
@@ -575,59 +757,72 @@ export default function Driver() {
                 }
                 setRecording(null);
             }
-
+    
             console.log('Starting audio recording...');
             await Audio.setAudioModeAsync({
                 allowsRecordingIOS: true,
                 playsInSilentModeIOS: true,
                 staysActiveInBackground: true,
-                interruptionModeIOS: 1, // Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX
-                interruptionModeAndroid: 1, // Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX
+                interruptionModeIOS: 1,
+                interruptionModeAndroid: 1,
             });
-
+    
             const { recording: newRecording } = await Audio.Recording.createAsync(
                 Audio.RecordingOptionsPresets.HIGH_QUALITY
             );
-
+    
             console.log('Recording started successfully');
             setRecording(newRecording);
             setIsRecording(true);
-
+    
             setListeningStatus('listening');
             setUserQuery(null);
             setApiResponse(null);
-
+    
             setShowVoiceModal(true);
             chatBubbleOpacity.setValue(1);
-        } catch (error: any) {
+    
+            // Reset VAD state
+            setHasDetectedSpeech(false);
+            setSilenceCounter(0);
+            setIsSmartRecording(true);
+    
+            // Start the VAD checking
+            checkForSpeech();
+        } catch (error) {
             console.error('Failed to start recording:', error);
-            Alert.alert("Recording Error", "Could not start recording: " + (error.message || "Unknown error"));
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            Alert.alert("Recording Error", "Could not start recording: " + errorMessage);
             setListeningStatus('idle');
         }
     };
 
     const stopRecording = async () => {
+        setIsRecording(false);
+        cleanupRecording();
+
         if (!recording) {
             console.warn('No active recording to stop');
             return;
         }
 
         try {
-            console.log('Stopping recording...');
+            console.log('Stopping recording device...');
             await recording.stopAndUnloadAsync();
 
             await Audio.setAudioModeAsync({
                 allowsRecordingIOS: false,
                 playsInSilentModeIOS: true,
                 staysActiveInBackground: true,
-                interruptionModeIOS: 1, // Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX
-                interruptionModeAndroid: 1, // Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX
+                interruptionModeIOS: 1,
+                interruptionModeAndroid: 1,
             });
 
             const uri = recording.getURI();
             console.log('Recording stopped and stored at', uri);
 
             if (uri) {
+                console.log('Processing completed recording...');
                 await sendAudioToAPI(uri);
                 saveAudioAsWav(uri).catch(err => console.error("Error saving audio:", err));
             } else {
@@ -637,13 +832,13 @@ export default function Driver() {
             }
 
             setRecording(null);
-            setIsRecording(false);
+            // setIsRecording(false);
 
-        } catch (error: any) {
+        } catch (error) {
             console.error('Failed to stop recording:', error);
             setApiResponse("Error stopping recording: " + (error.message || "Unknown error"));
             setRecording(null);
-            setIsRecording(false);
+            // setIsRecording(false);
             setListeningStatus('idle');
         }
     };
@@ -948,14 +1143,23 @@ export default function Driver() {
 
                 <TouchableOpacity
                     style={isRecording ? styles.recordingButton : styles.voiceAssistantButton}
-                    onPress={handleVoiceAssistant}
-                    onLongPress={startRecording}
-                    onPressOut={() => {
-                        if (isRecording) {
+                    onPress={() => {
+                        if (!isRecording) {
+                            console.log('Starting recording (button press)');
+                            startRecording();
+                        } else {
+                            console.log('Stopping recording (manual button press)');
                             stopRecording();
                         }
                     }}
-                    delayLongPress={500}
+                    // Remove these longPress handlers
+                    // onLongPress={startRecording}
+                    // onPressOut={() => {
+                    //     if (isRecording) {
+                    //         stopRecording();
+                    //     }
+                    // }}
+                    // delayLongPress={500}
                 >
                     <FontAwesome5
                         name={isRecording ? "stop" : "microphone"}

@@ -1,6 +1,9 @@
 # backend/api/dependencies.py
 from functools import lru_cache
 import logging
+import httpx  # Import httpx
+import ssl
+import certifi # **** ADD CERTIFI IMPORT ****
 
 from ..core.clients.twillio_client import TwilioClient
 from ..core.config import Settings, settings as global_settings
@@ -20,11 +23,12 @@ from ..services.translation_service import TranslationService
 from ..services.navigation_service import NavigationService
 from ..services.safety_service import SafetyService
 from ..services.conversation_service import ConversationService
-from ..core.exception import ConfigurationError # Import exception
+from ..core.exception import ConfigurationError  # Import exception
 
 logger = logging.getLogger(__name__)
 
-from fastapi import Depends, Request # Import Request if needed later for app.state
+from fastapi import Depends, Request  # Import Request if needed later for app.state
+
 
 # --- Settings ---
 @lru_cache()
@@ -33,10 +37,11 @@ def get_settings() -> Settings:
     logger.debug("Providing Settings instance (from global import, cached).")
     return global_settings
 
+
 # --- Initialize Clients Globally (Once) ---
 # This code runs when the module is imported, in the main thread.
 try:
-    _settings_instance = get_settings() # Get settings once
+    _settings_instance = get_settings()  # Get settings once
     logger.info("Initializing global client instances...")
 
     _stt_client_instance = GoogleSttClient(settings=_settings_instance)
@@ -57,35 +62,57 @@ try:
     _twilio_client_instance = TwilioClient(settings=_settings_instance)
     logger.info("Global TwilioClient initialized (or disabled).")
 
+    # --- Initialize HTTPX Client with Custom SSL Context ---
+    _http_client_instance = None
+    try:
+        # WARNING: Disabling SSL verification is insecure. For testing/hackathon only.
+        _http_client_instance = httpx.AsyncClient(
+            timeout=15.0,
+            verify=False  # <<< DISABLE VERIFICATION HERE
+        )
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        logger.warning("!!! Initialized httpx client with SSL VERIFICATION DISABLED !!!")
+        logger.warning("!!! This is insecure and only for temporary hackathon use.  !!!")
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+    except Exception as http_init_exc:
+        logger.critical(f"Failed to initialize httpx client: {http_init_exc}", exc_info=True)
+        _http_client_instance = None  # Ensure it's None on failure
+    # --- End HTTPX Client Init ---
+
+    logger.info("All global client instances initialized successfully.")
+
+
     logger.info("All global client instances initialized successfully.")
 
 except ConfigurationError as e:
-     # Log critical error if client init fails here, app might not work
-     logger.critical(f"FATAL: Failed to initialize global client instances in dependencies.py: {e}", exc_info=True)
-     # Set instances to None or re-raise to potentially stop app? For now, set to None.
-     _stt_client_instance = None
-     _tts_client_instance = None
-     _gemini_client_instance = None
-     _translate_client_instance = None
-     _maps_client_instance = None
-     _twilio_client_instance = None
-     # You might want to raise the exception again if clients are absolutely essential
-     # raise e
+    # Log critical error if client init fails here, app might not work
+    logger.critical(f"FATAL: Failed to initialize global client instances in dependencies.py: {e}", exc_info=True)
+    # Set instances to None or re-raise to potentially stop app? For now, set to None.
+    _stt_client_instance = None
+    _tts_client_instance = None
+    _gemini_client_instance = None
+    _translate_client_instance = None
+    _maps_client_instance = None
+    _twilio_client_instance = None
+    _http_client_instance = None # Ensure http client is also None
+    # You might want to raise the exception again if clients are absolutely essential
+    # raise e
 except Exception as e:
-     logger.critical(f"FATAL: Unexpected error initializing global client instances in dependencies.py: {e}", exc_info=True)
-     _stt_client_instance = None
-     _tts_client_instance = None
-     _gemini_client_instance = None
-     _translate_client_instance = None
-     _maps_client_instance = None
-     _twilio_client_instance = None
-     # raise ConfigurationError(f"Unexpected error during global client setup: {e}", original_exception=e)
+    logger.critical(f"FATAL: Unexpected error initializing global client instances in dependencies.py: {e}", exc_info=True)
+    _stt_client_instance = None
+    _tts_client_instance = None
+    _gemini_client_instance = None
+    _translate_client_instance = None
+    _maps_client_instance = None
+    _twilio_client_instance = None
+    _http_client_instance = None # Ensure http client is also None
+    # raise ConfigurationError(f"Unexpected error during global client setup: {e}", original_exception=e)
 
 
 # --- Client Getter Functions (Now return global instances) ---
 def get_google_stt_client() -> GoogleSttClient:
     """Provides the globally initialized GoogleSttClient instance."""
-    # Optional: Check if instance is None due to initialization error
     if _stt_client_instance is None:
         raise ConfigurationError("Google STT Client was not initialized successfully.")
     logger.debug("Providing global GoogleSttClient instance.")
@@ -122,62 +149,67 @@ def get_google_maps_client() -> GoogleMapsClient:
 def get_twilio_client() -> TwilioClient:
     """Provides the globally initialized TwilioClient instance."""
     if _twilio_client_instance is None:
-        # Twilio might be intentionally disabled, maybe don't raise? Check its internal 'enabled' flag?
-        # For consistency, let's raise if the object itself couldn't be created.
-        # The service using it should handle the case where it's created but disabled.
         raise ConfigurationError("Twilio Client object was not initialized successfully.")
     logger.debug("Providing global TwilioClient instance.")
     return _twilio_client_instance
 
+# --- Add HTTPX Client Getter ---
+def get_http_client() -> httpx.AsyncClient:
+    """Provides the globally initialized httpx.AsyncClient instance."""
+    if _http_client_instance is None:
+        # This will now also catch the case where custom context creation failed
+        raise ConfigurationError("HTTPX Client was not initialized successfully.")
+    logger.debug("Providing global httpx.AsyncClient instance.")
+    return _http_client_instance
+
 
 # --- Service Getters (Depend on global client getters and settings) ---
-# No @lru_cache needed here either
+# No changes needed below this line compared to the previous correct version
 
 def get_transcription_service(
-    stt_client: GoogleSttClient = Depends(get_google_stt_client), # Depends on global client getter
-    settings: Settings = Depends(get_settings) # Still need settings for the service itself
+    stt_client: GoogleSttClient = Depends(get_google_stt_client),
+    settings: Settings = Depends(get_settings)
 ) -> TranscriptionService:
-    """Provides TranscriptionService instance, using injected dependencies."""
     logger.debug("Providing TranscriptionService instance.")
     return TranscriptionService(stt_client=stt_client, settings=settings)
 
 def get_translation_service(
-    translate_client: GoogleTranslateClient = Depends(get_google_translate_client), # Depends on global client getter
+    translate_client: GoogleTranslateClient = Depends(get_google_translate_client),
     settings: Settings = Depends(get_settings)
 ) -> TranslationService:
-    """Provides TranslationService instance, using injected dependencies."""
     logger.debug("Providing TranslationService instance.")
     return TranslationService(translate_client=translate_client, settings=settings)
 
 def get_nlu_service(
-    gemini_client: GeminiClient = Depends(get_gemini_client), # Depends on global client getter
+    gemini_client: GeminiClient = Depends(get_gemini_client),
     settings: Settings = Depends(get_settings)
 ) -> NluService:
-    """Provides NluService instance, using injected dependencies."""
     logger.debug("Providing NluService instance.")
     return NluService(gemini_client=gemini_client, settings=settings)
 
 def get_synthesis_service(
-    tts_client: GoogleTtsClient = Depends(get_google_tts_client), # Depends on global client getter
+    tts_client: GoogleTtsClient = Depends(get_google_tts_client),
     settings: Settings = Depends(get_settings)
 ) -> SynthesisService:
-    """Provides SynthesisService instance, using injected dependencies."""
     logger.debug("Providing SynthesisService instance.")
     return SynthesisService(tts_client=tts_client, settings=settings)
 
 def get_navigation_service(
-    maps_client: GoogleMapsClient = Depends(get_google_maps_client), # Depends on global client getter
+    maps_client: GoogleMapsClient = Depends(get_google_maps_client),
+    http_client: httpx.AsyncClient = Depends(get_http_client), # Correctly depends on http_client
     settings: Settings = Depends(get_settings)
 ) -> NavigationService:
-    """Provides NavigationService instance, using injected dependencies."""
     logger.debug("Providing NavigationService instance.")
-    return NavigationService(maps_client=maps_client, settings=settings)
+    return NavigationService(
+        maps_client=maps_client,
+        http_client=http_client, # Correctly passes http_client
+        settings=settings
+    )
 
 def get_safety_service(
     settings: Settings = Depends(get_settings),
-    twilio_client: TwilioClient = Depends(get_twilio_client) # Depends on global client getter
+    twilio_client: TwilioClient = Depends(get_twilio_client)
 ) -> SafetyService:
-    """Provides SafetyService instance, using injected dependencies."""
     logger.debug("Providing SafetyService instance.")
     return SafetyService(settings=settings, twilio_client=twilio_client)
 
@@ -190,7 +222,6 @@ def get_conversation_service(
     safety_service: SafetyService = Depends(get_safety_service),
     settings: Settings = Depends(get_settings)
 ) -> ConversationService:
-    """Provides ConversationService instance, using injected dependencies."""
     logger.debug("Providing ConversationService instance.")
     return ConversationService(
         transcription_service=transcription_service,

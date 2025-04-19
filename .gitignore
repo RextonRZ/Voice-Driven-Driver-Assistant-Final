@@ -59,6 +59,7 @@ coverage/
 ehthumbs.db
 Thumbs.db
 
+<<<<<<< HEAD
 frontend/package-lock.json
 frontend/package.json
 
@@ -67,3 +68,6 @@ frontend/gcloudconfig.json
 
 # Ignore generated audio files
 backend/generated_audio/
+=======
+frontend/package-lock.json
+>>>>>>> 72e41e159c86d4ed78b9105cf2a49df4b20a70e5

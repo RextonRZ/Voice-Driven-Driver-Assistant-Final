@@ -14,15 +14,15 @@ google-generativeai
 googlemaps
 
 # For noise reduction
-tensorflow
-tensorflow_hub
+# tensorflow
+# tensorflow_hub
 librosa
 numpy
 scipy
 noisereduce
 soundfile
 
-deepfilternet
+# deepfilternet
 
 # Computer Vision/ML for Drowsiness
 opencv-python
@@ -35,3 +35,7 @@ pyyaml
 # Additional Dependencies
 openwakeword==0.5.0
 websockets>=10.0
+# --- NEW for Flood Check ---
+httpx # Async HTTP client
+beautifulsoup4 # HTML parsing
+lxml # Optional: Usually faster HTML parser for BeautifulSoup

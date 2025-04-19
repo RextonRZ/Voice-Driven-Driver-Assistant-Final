@@ -61,7 +61,7 @@ export class MapsService {
   static async getDirections(origin: string, destination: string): Promise<any> {
     try {
       console.log('Requesting directions with origin:', origin, 'destination:', destination);
-      const response = await axios.get(`${API_URL}/maps/directions`, {
+      const response = await axios.get(`${API_URL}/navigation/directions`, {
         params: { origin, destination },
       });
       const responseData = await response.data;
@@ -79,7 +79,7 @@ export class MapsService {
   static async getPlaceCoordinates(placeName: string): Promise<{ latitude: number; longitude: number }> {
     try {
       console.log(`Fetching coordinates for place: ${placeName}`);
-      const response = await axios.get(`${API_URL}/maps/place-coordinates`, {
+      const response = await axios.get(`${API_URL}/navigation/place-coordinates`, {
         params: { placeName },
       });
 

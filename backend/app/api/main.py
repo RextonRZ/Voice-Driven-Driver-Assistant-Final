@@ -1,4 +1,6 @@
 import logging
+from dotenv import load_dotenv
+import os
 import sys # For stdout logging handler
 from fastapi import FastAPI, Request, status, Depends
 from fastapi.responses import JSONResponse
@@ -80,6 +82,7 @@ app.add_middleware(
     allow_headers=["*"],    # Allow all headers
 )
 
+load_dotenv()
 
 # --- Include API Routers ---
 app.include_router(assistant.router)
