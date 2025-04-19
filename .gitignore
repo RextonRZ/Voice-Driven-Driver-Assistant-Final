@@ -61,3 +61,9 @@ Thumbs.db
 
 frontend/package-lock.json
 frontend/package.json
+
+# Ignore local gcloud config
+frontend/gcloudconfig.json
+
+# Ignore generated audio files
+backend/generated_audio/
