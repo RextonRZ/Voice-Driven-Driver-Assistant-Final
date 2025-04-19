@@ -98,7 +98,6 @@ class NavigationService:
         """
         try:
             api_key = os.getenv("GOOGLE_MAPS_API_KEY")  # Assume API key is in settings
-            logger.info(f"Fetching coordinates for place: {api_key}")
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
             params = {
                 "query": place_name,
