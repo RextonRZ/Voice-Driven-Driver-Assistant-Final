@@ -151,7 +151,6 @@ async def analyze_sleepiness(
     except InvalidRequestError as e:
         logger.warning(f"Invalid request for sleepiness analysis: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    # SafetyError might be raised if models fail internally, though analyze_driver_state currently returns None
     except SafetyError as e:
         logger.error(f"Error during sleepiness analysis: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error during analysis: {e.message}")

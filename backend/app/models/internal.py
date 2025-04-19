@@ -2,10 +2,7 @@
 from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel, Field
-from datetime import datetime
-from google.protobuf.duration_pb2 import Duration
-
-# --- NLU Related ---
+from datetime import datetime, timedelta
 
 class NluIntent(str, Enum):
     """Enumeration of possible user intents recognized by NLU."""
@@ -56,7 +53,7 @@ class RouteLocalizedValues(BaseModel):
 
 class RouteInfo(BaseModel):
     """Structured information about a calculated route using Routes API."""
-    duration: Optional[Duration] = Field(None, description="Estimated travel time including traffic.")
+    duration: Optional[timedelta] = Field(None, description="Estimated travel time including traffic (as timedelta).")
     distance_meters: Optional[int] = Field(None, description="Total distance in meters.")
     polyline_encoded: Optional[str] = Field(None, description="Encoded polyline for the entire route.")
     # Add legs if step-by-step is needed later

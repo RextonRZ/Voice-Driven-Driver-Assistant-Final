@@ -81,9 +81,36 @@ Output ONLY a JSON object with the following structure:
 
     # --- Navigation Settings ---
     MAPS_DEFAULT_REGION: str = "MY"  # Bias results towards a region (e.g., SG, MY, PH)
-    MAPS_DEFAULT_TRAVEL_MODE: str = "DRIVING"  # Routes API uses enum name
+    MAPS_DEFAULT_TRAVEL_MODE: str = "DRIVE"  # Routes API uses enum name
     MAPS_ROUTES_FIELD_MASK: str = "routes.legs.steps.localized_values,routes.legs.steps.polyline,routes.warnings,routes.localized_values,routes.route_token,routes.legs.polyline,routes.polyline.encodedPolyline,routes.distanceMeters,routes.duration,routes.travelAdvisory"  # Default fields for RouteInfo
-    FLOOD_CHECK_ENABLED: bool = False
+    FLOOD_CHECK_ENABLED: bool = True
+
+    # --- Flood Check Specific Settings ---
+    FLOOD_DATA_BASE_URL: str = "https://publicinfobanjir.water.gov.my"
+    # Mapping from state names (as likely returned by Google Geocoding for Malaysia)
+    # to the codes used on publicinfobanjir.water.gov.my
+    # NOTE: Verify these codes match the website's dropdown/query params exactly!
+    MALAYSIA_STATE_CODES: Dict[str, str] = {
+        "johor": "JHR",
+        "kedah": "KDH",
+        "kelantan": "KEL",
+        "melaka": "MLK",
+        "negeri sembilan": "NSN",
+        "pahang": "PHG",
+        "perak": "PRK",
+        "perlis": "PLS",
+        "pulau pinang": "PNG",  # Penang
+        "sabah": "SBH",
+        "sarawak": "SWK",
+        "selangor": "SEL",
+        "terengganu": "TRG",
+        "wilayah persekutuan kuala lumpur": "WLY",  # KL Federal Territory
+        "wilayah persekutuan labuan": "WLY",  # Labuan (assuming same code as KL? Verify)
+        "wilayah persekutuan putrajaya": "WLY",  # Putrajaya (assuming same code as KL? Verify)
+        "federal territory of kuala lumpur": "WLY",
+        "kuala lumpur": "WLY",
+        "penang": "PNG",
+    }
 
     # --- Safety Settings ---
     CRASH_DETECTION_NOTIFICATION_ENABLED: bool = True # Feature flag
