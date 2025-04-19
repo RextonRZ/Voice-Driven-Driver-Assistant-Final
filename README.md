@@ -8,6 +8,9 @@
 4. Lim Hong Yu
 ---
 
+**Presentation Slide Link**
+https://www.canva.com/design/DAGkb5EWKI8/DT8r0sga6pQ9fi8E0WbhAg/edit?utm_content=DAGkb5EWKI8&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton
+
 ## Table of Contents
 
 1.  [Overview](#overview)
