@@ -9,7 +9,6 @@ import requests # **** ADD requests IMPORT ****
 import asyncio # **** ADD asyncio IMPORT ****
 import functools # **** ADD functools IMPORT ****
 
-
 # Use the refactored client
 from ..core.clients.google_maps import GoogleMapsClient, COMPLEX_PLACE_TYPES
 from ..core.config import Settings
@@ -99,6 +98,7 @@ class NavigationService:
         """
         try:
             api_key = os.getenv("GOOGLE_MAPS_API_KEY")  # Assume API key is in settings
+            logger.info(f"Fetching coordinates for place: {api_key}")
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
             params = {
                 "query": place_name,

@@ -143,8 +143,8 @@ Output ONLY a JSON object with the following structure:
 
     # --- Drowsiness Detection Settings ---
     DROWSINESS_DETECTION_ENABLED: bool = True
-    YAWN_MODEL_PATH: str = r"C:\Users\ooiru\Voice-Driven-Driver-Assistant-Final\backend\app\ml_models\detect_eye_best.pt"
-    EYE_MODEL_PATH: str = r"C:\Users\ooiru\Voice-Driven-Driver-Assistant-Final\backend\app\ml_models\detect_yawn_best.pt"
+    YAWN_MODEL_PATH: str = "/Users/vannessliu/VisualStudioCode/Voice-Driven-Driver-Assistant-Final/backend/app/ml_models/detect_eye_best.pt"
+    EYE_MODEL_PATH: str = "/Users/vannessliu/VisualStudioCode/Voice-Driven-Driver-Assistant-Final/backend/app/ml_models/detect_yawn_best.pt"
     # Thresholds (adjust based on testing and batch duration)
     DROWSINESS_YAWN_THRESHOLD_SEC: float = 5.0  # Shorter than original? Depends on batch analysis.
     DROWSINESS_MICROSLEEP_THRESHOLD_SEC: float = 2.0  # Shorter than original?

@@ -1,4 +1,5 @@
 import logging
+import platform
 from typing import Tuple, Optional
 import base64
 import binascii
@@ -11,11 +12,22 @@ try:
     from pydub import AudioSegment
     from pydub.exceptions import CouldntDecodeError
 
+    current_os = platform.system()
+
     # Define the directory containing ffmpeg binaries
-    ffmpeg_bin_dir = r'C:\Users\ooiru\Downloads\ffmpeg-2025-03-31-git-35c091f4b7-full_build\ffmpeg-2025-03-31-git-35c091f4b7-full_build\bin' # Or C:\ffmpeg\bin
-    # Construct the full path to the ffmpeg.exe file
-    ffmpeg_executable = os.path.join(ffmpeg_bin_dir, 'ffmpeg.exe')
-    ffprobe_executable = os.path.join(ffmpeg_bin_dir, 'ffprobe.exe')
+    if current_os == "Windows":
+        # Define the directory containing FFmpeg binaries for Windows
+        ffmpeg_bin_dir = r'C:\Users\hongy\Downloads\ffmpeg-n6.1-latest-win64-gpl-6.1\bin'  
+        ffmpeg_executable = os.path.join(ffmpeg_bin_dir, 'ffmpeg.exe')
+        ffprobe_executable = os.path.join(ffmpeg_bin_dir, 'ffprobe.exe')
+    elif current_os == "Darwin":  # macOS
+        # Define the path to FFmpeg for macOS
+        ffmpeg_executable = "/opt/homebrew/bin/ffmpeg"  
+        ffprobe_executable = "/opt/homebrew/bin/ffprobe"
+    else:
+        logging.error(f"Unsupported operating system: {current_os}")
+        raise OSError(f"Unsupported operating system: {current_os}")
+
 
     # Set converter path
     if os.path.exists(ffmpeg_executable):
