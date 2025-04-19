@@ -16,6 +16,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from typing import Optional, Tuple
+from google.api_core.exceptions import InvalidArgument  # Ensure this import is added
 
 # Models
 from ..models.request import ProcessAudioRequest, OrderContext
@@ -135,6 +136,12 @@ async def interact(
         logger.info(f"Interaction processed successfully for session: {session_id}")
         return response
 
+    except InvalidArgument as e:  # Handle InvalidArgument exception
+        logger.error(f"Invalid argument error during transcription: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid argument error during transcription: {str(e)}"
+        )
     except InvalidRequestError as e:
         logger.error(f"Invalid request: {e}")
         raise HTTPException(
@@ -151,7 +158,7 @@ async def interact(
         logger.exception(f"Unexpected error during interaction: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while processing the request."
+            detail=f"An unexpected error occurred during transcription: {str(e)}"
         )
     finally:
         end_time = time.time()  # End timing
