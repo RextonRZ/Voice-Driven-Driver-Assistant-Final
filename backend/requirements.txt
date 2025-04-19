@@ -22,7 +22,7 @@ scipy
 noisereduce
 soundfile
 
-deepfilternet
+# deepfilternet
 
 # Computer Vision/ML for Drowsiness
 opencv-python
@@ -31,3 +31,8 @@ ultralytics
 torch
 torchvision
 pyyaml
+
+# --- NEW for Flood Check ---
+httpx # Async HTTP client
+beautifulsoup4 # HTML parsing
+lxml # Optional: Usually faster HTML parser for BeautifulSoup

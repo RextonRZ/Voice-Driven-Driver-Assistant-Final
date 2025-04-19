@@ -2,8 +2,8 @@
 import logging
 import googlemaps # Keep for Places/Geocoding
 from google.maps import routing_v2 # Use the new Routes API library
-from google.protobuf.duration_pb2 import Duration
-from datetime import datetime
+from google.type import latlng_pb2 # Import the LatLng structure
+from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict, Any
 import asyncio
 from google.api_core.exceptions import GoogleAPIError, InvalidArgument
@@ -62,7 +62,7 @@ class GoogleMapsClient:
             # Use LatLng coordinates
             return routing_v2.Waypoint(
                 location=routing_v2.Location(
-                    lat_lng=routing_v2.LatLng(latitude=location[0], longitude=location[1])
+                    lat_lng=latlng_pb2.LatLng(latitude=location[0], longitude=location[1])
                 )
             )
         else:
@@ -107,7 +107,7 @@ class GoogleMapsClient:
             route = response.routes[0]
 
             # Extract core info
-            duration: Optional[Duration] = route.duration if route.duration else None
+            duration: Optional[timedelta] = route.duration if route.duration else None
             distance_meters: Optional[int] = route.distance_meters if route.distance_meters else None
             polyline_encoded: Optional[str] = route.polyline.encoded_polyline if route.polyline else None
 
@@ -311,6 +311,50 @@ class GoogleMapsClient:
         except Exception as e:
             logger.error(f"Unexpected error during geocoding: {e}", exc_info=True)
             raise NavigationError(f"An unexpected error occurred during geocoding: {e}", original_exception=e)
+
+    async def reverse_geocode_location(self, location: Tuple[float, float]) -> Optional[Dict[str, Any]]:
+        """
+        Reverse geocodes coordinates to get address components using legacy client.
+
+        Returns:
+            A dictionary similar to geocode_address (containing address_components),
+            or None if not found.
+        """
+        if not location or len(location) != 2:
+            raise InvalidRequestError("Valid (lat, lon) tuple is required for reverse geocoding.")
+
+        lat, lon = location
+        logger.info(f"Reverse geocoding location using legacy client: Lat={lat}, Lon={lon}")
+        try:
+            loop = asyncio.get_running_loop()
+            reverse_geocode_result = await loop.run_in_executor(
+                None,
+                self.legacy_client.reverse_geocode,
+                (lat, lon),
+                # You can add result_type or location_type filters if needed
+                # result_type=['administrative_area_level_1'] # Example: To potentially only get state faster
+            )
+            if reverse_geocode_result:
+                # Return the first result, which is usually the most specific
+                first_result = reverse_geocode_result[0]
+                logger.info(f"Reverse geocoding successful. Formatted Address: {first_result.get('formatted_address')}")
+                # Return structure similar to geocode for consistency
+                return {
+                    "geometry": first_result.get("geometry", {}),
+                    "place_id": first_result.get("place_id"),
+                    "formatted_address": first_result.get("formatted_address"),
+                    "types": first_result.get("types", []),
+                    "address_components": first_result.get("address_components", [])
+                }
+            else:
+                logger.warning(f"Reverse geocoding returned no results for location: {location}")
+                return None
+        except googlemaps.exceptions.ApiError as e:
+            logger.error(f"Google Reverse Geocoding API error: {e}", exc_info=True)
+            raise NavigationError(f"Reverse Geocoding API request failed: {e}", original_exception=e)
+        except Exception as e:
+            logger.error(f"Unexpected error during reverse geocoding: {e}", exc_info=True)
+            raise NavigationError(f"An unexpected error occurred during reverse geocoding: {e}", original_exception=e)
 
     async def get_place_details(
         self,

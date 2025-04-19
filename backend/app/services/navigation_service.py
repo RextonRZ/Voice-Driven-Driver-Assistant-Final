@@ -1,6 +1,12 @@
 # backend/services/navigation_service.py
 import logging
 from typing import Optional, Tuple, List, Any, Dict
+from bs4 import BeautifulSoup # Import BeautifulSoup
+import httpx # Keep for type hint in __init__
+import requests # **** ADD requests IMPORT ****
+import asyncio # **** ADD asyncio IMPORT ****
+import functools # **** ADD functools IMPORT ****
+
 
 # Use the refactored client
 from ..core.clients.google_maps import GoogleMapsClient, COMPLEX_PLACE_TYPES
@@ -11,13 +17,16 @@ from ..models.internal import RouteInfo, RouteWarning, OrderContext
 
 logger = logging.getLogger(__name__)
 
+FLOOD_ALERT_LEVELS = {"alert", "warning", "danger"}
+
 class NavigationService:
     """Handles navigation-related tasks like routing, ETA, and checks using Routes API."""
 
-    def __init__(self, maps_client: GoogleMapsClient, settings: Settings):
+    def __init__(self, maps_client: GoogleMapsClient, http_client: httpx.AsyncClient, settings: Settings):
         self.maps_client = maps_client
+        self.http_client = http_client # Store the http client
         self.settings = settings
-        logger.debug("NavigationService initialized (using Routes API via client).")
+        logger.debug("NavigationService initialized (using Routes API via client and httpx).")
 
     async def get_route_and_eta(
         self,
@@ -84,47 +93,95 @@ class NavigationService:
 
     async def check_flood_zones(
         self,
-        route_info: Optional[RouteInfo] = None,
+        route_info: Optional[RouteInfo] = None, # Keep route_info for potential future use
         location: Optional[Tuple[float, float]] = None
         ) -> List[RouteWarning]:
-        """Checks for flood warnings (Placeholder logic remains)."""
-        # ... existing placeholder logic ...
-        # Note: The route_info.warnings now come from the Routes API parse
-        if not self.settings.FLOOD_CHECK_ENABLED:
-             return []
-
+        """
+        Checks for flood warnings based on driver's current state using scraped river level data.
+        """
         warnings = []
-        logger.info("Performing flood zone check (Placeholder)...")
+        if not self.settings.FLOOD_CHECK_ENABLED:
+            logger.debug("Flood check is disabled in settings.")
+            return []
+        if not location:
+            logger.warning("Flood check requires current location (lat, lon).")
+            return [] # Cannot perform check without location
 
-        # 1. Check warnings from Routes API response
-        if route_info and route_info.warnings:
-             # Filter or reformat warnings if needed
-             for warning in route_info.warnings:
-                 # You might want to check severity or specific messages
-                 warnings.append(warning) # Add directly for now
+        logger.info(f"Performing flood zone check for location {location} using publicinfobanjir data...")
 
-        # 2. Query External Flood APIs (Placeholder)
-        # ...
+        # 1. Get State from Location using Reverse Geocoding
+        state_name = None
+        try:
+            geo_result = await self.maps_client.reverse_geocode_location(location)
+            if geo_result and geo_result.get("address_components"):
+                for component in geo_result["address_components"]:
+                    types = component.get("types", [])
+                    # State level component in Google Geocoding API
+                    if "administrative_area_level_1" in types:
+                        state_name = component.get("long_name")
+                        logger.info(f"Determined state from location {location} as: {state_name}")
+                        break
+            if not state_name:
+                 logger.warning(f"Could not determine state name from reverse geocoding result for {location}.")
+                 return [] # Cannot proceed without state
 
-        # Simple Placeholder based on address (use populated address now)
-        destination_address = route_info.end_address if route_info else ""
-        if location and not route_info:
-            # Maybe geocode location to get an address hint?
-             geo_result = await self.maps_client.geocode_address(f"{location[0]},{location[1]}") # Geocode tuple
-             destination_address = geo_result.get("formatted_address", f"area around {location}") if geo_result else f"area around {location}"
+        except NavigationError as e:
+            logger.error(f"Reverse geocoding failed during flood check for location {location}: {e}")
+            return [] # Cannot proceed
+        except Exception as e:
+            logger.error(f"Unexpected error during reverse geocoding for flood check: {e}", exc_info=True)
+            return [] # Cannot proceed
 
-        if "bedok" in destination_address.lower() or "geylang" in destination_address.lower():
-            # Ensure no duplicates if API already warned
-            if not any("bedok" in w.message.lower() or "geylang" in w.message.lower() for w in warnings):
-                 warnings.append(RouteWarning(type="FLOOD_PLACEHOLDER", message=f"Placeholder: Potential flood risk noted in {destination_address}.", location=location))
+        # 2. Map State Name to State Code
+        state_code = self._get_state_code(state_name)
+        if not state_code:
+            logger.error(f"Cannot perform flood check: Failed to map state name '{state_name}' to a known code.")
+            return []
 
-        if warnings:
-             logger.warning(f"Flood check found {len(warnings)} potential warnings.")
+        # 3. Fetch and Parse River Level Data for the State
+        try:
+            station_levels = await self._fetch_parse_river_levels(state_code)
+        except Exception as e:
+             logger.error(f"Failed to fetch or parse flood data for state {state_code}: {e}", exc_info=True)
+             # Optionally return a warning indicating data couldn't be fetched
+             warnings.append(RouteWarning(type="FLOOD_DATA_ERROR", message=f"Could not retrieve latest flood data for {state_name}."))
+             return warnings
+
+        # 4. Check for Alert Levels in the Parsed Data
+        alert_stations = []
+        for station in station_levels:
+            status = station.get("status", "Unknown").lower()
+            if status in FLOOD_ALERT_LEVELS:
+                station_name = station.get('station_name', 'Unknown Station')
+                district = station.get('district', 'Unknown District')
+                level = station.get('water_level_m', 'N/A')
+                last_updated = station.get('last_updated', 'N/A')
+                alert_stations.append(f"{station_name} ({district}) at {status.capitalize()} level ({level}m as of {last_updated})")
+
+        # 5. Create Warnings
+        if alert_stations:
+            num_alerts = len(alert_stations)
+            # Create a single, more general warning for the state
+            warning_message = f"Potential flood alerts: {num_alerts} station(s) in {state_name} reporting elevated levels (Alert/Warning/Danger)."
+            # Optionally list the first few stations
+            if num_alerts <= 3:
+                 warning_message += " Details: " + "; ".join(alert_stations)
+            else:
+                 warning_message += f" Example: {alert_stations[0]}"
+
+            logger.warning(f"Flood Alert: {warning_message}")
+            warnings.append(RouteWarning(type="FLOOD_ALERT", message=warning_message))
         else:
-             logger.info("No flood warnings found.")
+            logger.info(f"No flood alerts (Alert/Warning/Danger) found for state: {state_name} ({state_code}) based on latest check.")
+
+        # Include placeholder warnings if any (can be removed if only using scraped data)
+        # ... (existing placeholder logic based on destination address can be kept or removed) ...
+        # if "bedok" in destination_address.lower() or "geylang" in destination_address.lower():
+        #     if not any("bedok" in w.message.lower() or "geylang" in w.message.lower() for w in warnings):
+        #          warnings.append(RouteWarning(type="FLOOD_PLACEHOLDER", message=f"Placeholder: Potential flood risk noted in {destination_address}.", location=location))
+
 
         return warnings
-
     async def is_pickup_location_complex(self, order_context: OrderContext) -> bool:
         """
         Checks if the pickup location is likely complex (mall, airport, etc.)
@@ -194,3 +251,107 @@ class NavigationService:
             logger.info(
                 f"Could not determine complexity for '{location_identifier}' based on available info. Assuming NOT complex.")
             return False
+
+    def _get_state_code(self, state_name_from_geo: str) -> Optional[str]:
+        """Maps a state name (from geocoding) to the website's state code."""
+        if not state_name_from_geo:
+            return None
+        # Normalize the input name (lowercase)
+        normalized_state = state_name_from_geo.lower()
+        # Look up in the settings map
+        code = self.settings.MALAYSIA_STATE_CODES.get(normalized_state)
+        if code:
+            logger.debug(f"Mapped state name '{normalized_state}' to code '{code}'.")
+        else:
+            logger.warning(f"Could not map state name '{normalized_state}' to a known state code.")
+        return code
+
+    # --- NEW: Helper to scrape and parse flood data ---
+    async def _fetch_parse_river_levels(self, state_code: str) -> List[Dict[str, str]]:
+        """Fetches and parses river level data using synchronous requests library."""
+        stations_data = []
+        target_url = f"{self.settings.FLOOD_DATA_BASE_URL}/aras-air/data-paras-air/aras-air-data/"
+        params = {
+            'state': state_code,
+            'district': 'ALL',
+            'station': 'ALL',
+            'lang': 'en'
+        }
+        logger.info(f"Fetching river level data from {target_url} for state {state_code} using 'requests' library...")
+
+        try:
+            # --- Use synchronous requests in an executor ---
+            loop = asyncio.get_running_loop()
+            requests_get_with_args = functools.partial(
+                requests.get,
+                params=params,
+                timeout=15.0,
+                verify=False # Disable verification directly in requests
+            )
+            # Log the dangerous setting
+            logger.warning("!!! Disabling SSL verification for 'requests' call to flood site (Hackathon Fix) !!!")
+
+            # Run the synchronous call in the default executor
+            response = await loop.run_in_executor(
+                None,
+                requests_get_with_args, # The partial function
+                target_url # The positional URL argument
+            )
+            # --------------------------------------------
+
+            response.raise_for_status() # Raise HTTP errors
+            html_content = response.text
+            logger.debug(f"Successfully fetched HTML content ({len(html_content)} bytes) via 'requests'.")
+
+            # --- Parsing logic remains the same ---
+            soup = BeautifulSoup(html_content, 'lxml')
+            table = soup.find('table')
+            if not table:
+                logger.warning(f"Could not find the data table on the flood page for state {state_code}.")
+                return []
+            tbody = table.find('tbody')
+            if not tbody:
+                 logger.warning(f"Could not find the tbody within the data table for state {state_code}.")
+                 return []
+            # ... (rest of parsing logic as before) ...
+            header_map = { # Map column index to a meaningful key
+                2: "station_name", 3: "district", 6: "last_updated", 7: "water_level_m",
+                8: "status_normal", 9: "status_alert", 10: "status_warning", 11: "status_danger",
+            }
+            status_keys = { 8: "Normal", 9: "Alert", 10: "Warning", 11: "Danger" }
+            rows = tbody.find_all('tr')
+            logger.debug(f"Found {len(rows)} rows in the table body.")
+            for row in rows:
+                cells = row.find_all('td')
+                if len(cells) < 12: continue
+                station_info = {}
+                current_status = "Unknown"
+                for idx, cell in enumerate(cells):
+                    key = header_map.get(idx)
+                    if key: station_info[key] = cell.text.strip()
+                    if idx in status_keys:
+                        cell_text = cell.text.strip()
+                        if cell_text: current_status = status_keys[idx]
+                station_info['status'] = current_status
+                if station_info.get("station_name"):
+                    stations_data.append(station_info)
+                    if current_status.lower() in FLOOD_ALERT_LEVELS:
+                        logger.debug(f"Parsed station data with alert: {station_info}")
+            logger.info(f"Parsed {len(stations_data)} stations for state {state_code}.")
+            return stations_data
+            # --- End Parsing Logic ---
+
+        except requests.exceptions.SSLError as e:
+             # Catch requests-specific SSL error
+             logger.error(f"Requests SSL error fetching flood data for {state_code}: {e}", exc_info=True)
+             # Check if it's still the same underlying issue
+             if "UNSAFE_LEGACY_RENEGOTIATION_DISABLED" in str(e):
+                 logger.error(">>> Still encountering UNSAFE_LEGACY_RENEGOTIATION even with requests and verify=False <<<")
+             return []
+        except requests.exceptions.RequestException as e:
+            # Catch other requests errors (timeout, connection error, etc.)
+            logger.error(f"Requests exception fetching flood data for state {state_code}: {e}", exc_info=True)
+            return []
+        except Exception as e:
+            logger.error(f"Error parsing flood data HTML for state {state_code}: {e}", exc_info=True)
+            return []
