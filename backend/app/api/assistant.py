@@ -1,6 +1,8 @@
 # backend/api/assistant.py
 import logging
 import json
+import base64 # Import base64 for decoding
+import binascii # Import binascii for error handling
 from fastapi import (
     APIRouter,
     Depends,
@@ -9,16 +11,17 @@ from fastapi import (
     Request,
     Form,
     File,
-    UploadFile
+    UploadFile, Body
 )
 from typing import Optional, Tuple
 
 # Models
-from ..models.request import ProcessAudioRequest, OrderContext
-from ..models.response import AssistantResponse
+from ..models.request import ProcessAudioRequest, OrderContext, DetectSpeechRequest # Added
+from ..models.response import AssistantResponse, DetectSpeechResponse # Added DetectSpeechResponse
 # Services & Dependencies
 from ..services.conversation_service import ConversationService
-from ..api.dependencies import get_conversation_service
+from ..services.transcription_service import TranscriptionService # Added TranscriptionService import
+from ..api.dependencies import get_conversation_service, get_transcription_service
 # Exceptions
 from ..core.exception import (
     AssistantBaseException, TranscriptionError, NluError, SynthesisError,
@@ -147,3 +150,66 @@ async def interact(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected internal server error occurred."
         )
+
+# --- NEW: Speech Detection Endpoint ---
+@router.post(
+    "/detect-speech",
+    response_model=DetectSpeechResponse,
+    summary="Detect speech in a short audio chunk",
+    description="Receives a short audio chunk (base64 encoded) and uses STT to detect "
+                "if any human speech is present. Used by the frontend to determine when to stop recording.",
+)
+async def detect_speech(
+    # Receive data from request body as JSON
+    request_data: DetectSpeechRequest = Body(...),
+    # Inject only the needed service
+    transcription_service: TranscriptionService = Depends(get_transcription_service)
+) -> DetectSpeechResponse:
+    """
+    Endpoint to check for voice activity in small audio segments.
+    """
+    session_id = request_data.session_id or "unknown"
+    logger.debug(f"Received speech detection request for session: {session_id}")
+
+    if not request_data.audio_data:
+        logger.warning(f"Received empty audio data for speech detection (session: {session_id}).")
+        # No audio means no speech detected
+        return DetectSpeechResponse(speech_detected=False)
+
+    try:
+        # Decode the base64 audio data string
+        try:
+            audio_bytes = base64.b64decode(request_data.audio_data)
+            logger.debug(f"Decoded base64 audio for detection: {len(audio_bytes)} bytes")
+        except (binascii.Error, ValueError) as decode_err:
+            logger.error(f"Invalid base64 audio data received for detection (session: {session_id}): {decode_err}")
+            raise InvalidRequestError(f"Invalid base64 encoding for audio data: {decode_err}")
+
+        # Call transcription service - we only care if transcript is non-empty
+        # No language hint needed, let STT try its best to detect anything
+        transcript, _ = await transcription_service.process_audio(
+            audio_data=audio_bytes,
+            language_code_hint=None # Explicitly None for broad detection
+        )
+
+        speech_was_detected = bool(transcript) # True if transcript is not empty, False otherwise
+        logger.debug(f"Speech detection result for session {session_id}: {speech_was_detected}. Transcript: '{transcript[:50]}...'")
+
+        return DetectSpeechResponse(speech_detected=speech_was_detected)
+
+    except InvalidRequestError as e:
+        # Errors during decoding or audio processing
+        logger.warning(f"Invalid request for speech detection (session: {session_id}): {e}")
+        # Decide how to handle: maybe return speech_detected=False or raise error?
+        # Raising 400 seems appropriate for bad input.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid audio data: {e.message}")
+    except TranscriptionError as e:
+        # Errors from the STT API itself
+        logger.error(f"STT error during speech detection (session: {session_id}): {e}")
+        # If STT fails, we can't reliably detect silence. Treat as if speech *might* be present? Or error out?
+        # Erroring out (502) seems safer than incorrectly telling FE to stop.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Speech detection failed due to STT error: {e.message}")
+    except Exception as e:
+        # Generic catch-all
+        logger.exception(f"Unexpected error during speech detection (session: {session_id}): {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected error during speech detection.")

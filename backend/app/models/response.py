@@ -17,6 +17,11 @@ class AssistantResponse(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+# --- NEW: Response model for speech detection endpoint ---
+class DetectSpeechResponse(BaseModel):
+    """Response model for the /assistant/detect-speech endpoint."""
+    speech_detected: bool = Field(..., description="True if speech was detected in the provided audio chunk, False otherwise.")
+
 class SafetyResponse(BaseModel):
     """Generic response model for safety endpoints."""
     status: str = Field(..., description="Status of the operation (e.g., 'acknowledged', 'failed').")

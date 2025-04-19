@@ -1,5 +1,5 @@
 # backend/models/request.py
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from pydantic import BaseModel, Field, Json
 from fastapi import Form, UploadFile, File
 from datetime import datetime
@@ -34,6 +34,10 @@ class InteractFormData:
         self.current_location_str = current_location
         self.order_context_str = order_context
 
+class DetectSpeechRequest(BaseModel):
+    """Request body for the /assistant/detect-speech endpoint."""
+    session_id: Optional[str] = None # Optional session tracking
+    audio_data: str = Field(..., description="Base64 encoded string of the short audio chunk.")
 
 # --- Safety Endpoint Request ---
 class CrashDetectionRequest(BaseModel):
