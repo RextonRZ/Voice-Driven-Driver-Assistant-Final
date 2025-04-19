@@ -14,8 +14,8 @@ google-generativeai
 googlemaps
 
 # For noise reduction
-tensorflow
-tensorflow_hub
+# tensorflow
+# tensorflow_hub
 librosa
 numpy
 scipy
