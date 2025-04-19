@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None # Recommended: Set this env var externally for ADC
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY") # Required for NLU
     GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY") # Required for Navigation
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
     # TWILIO_ACCOUNT_SID: Optional[str] = None # Required if using Twilio for SMS/Calls
     # TWILIO_AUTH_TOKEN: Optional[str] = None # Required if using Twilio
     # TWILIO_PHONE_NUMBER: Optional[str] = None # Required if using Twilio
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     DEFAULT_LANGUAGE_CODE: str = "en-US" # Fallback BCP-47 language
     SUPPORTED_LANGUAGES: List[str] = [ # BCP-47 codes for STT language detection hint
         "en-SG", "en-PH", "ms-MY", "id-ID",
-        "fil-PH", "th-TH", "vi-VN", "km-KH", "my-MM", "cmn-Hans-CN", "cmn-CN", "ta-IN"
+        "fil-PH", "th-TH", "vi-VN", "km-KH", "cmn-Hans-CN", "cmn-CN", "ta-IN"
     ]
 
     # --- Assistant Behavior ---

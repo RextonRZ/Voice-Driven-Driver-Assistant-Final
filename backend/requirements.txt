@@ -36,3 +36,5 @@ pyyaml
 httpx # Async HTTP client
 beautifulsoup4 # HTML parsing
 lxml # Optional: Usually faster HTML parser for BeautifulSoup
+
+openai
